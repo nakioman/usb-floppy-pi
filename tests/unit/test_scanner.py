@@ -1,8 +1,6 @@
 """Tests for storage.scanner."""
 from pathlib import Path
 
-import pytest
-
 from usb_floppy_pi.storage.scanner import scan
 
 
