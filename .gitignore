@@ -9,11 +9,16 @@ dist/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+htmlcov/
 .venv/
 venv/
 .env
 .coverage
+.mypy_cache/
+*.log
 .idea/
 .vscode/
-*.swp
+*.sw[op]
+*~
 .DS_Store
+Thumbs.db
