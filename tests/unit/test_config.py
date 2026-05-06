@@ -2,9 +2,7 @@
 import json
 from pathlib import Path
 
-import pytest
-
-from usb_floppy_pi.core.config import Config, DEFAULT_CONFIG, load_config, save_config
+from usb_floppy_pi.core.config import DEFAULT_CONFIG, Config, load_config, save_config
 
 
 def test_load_returns_defaults_when_file_missing(tmp_path: Path) -> None:
@@ -66,3 +64,25 @@ def test_load_returns_defaults_for_corrupted_json(tmp_path: Path) -> None:
     cfg = load_config(cfg_path)
     # Falls back to defaults rather than crashing
     assert cfg.mute is False
+
+
+def test_load_returns_defaults_for_binary_file(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_bytes(b"\xff\xfe\x00\x00binary garbage")
+    cfg = load_config(cfg_path)
+    assert cfg.mute is False  # defaults
+
+
+def test_load_returns_defaults_for_non_object_json(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text("[1, 2, 3]")
+    cfg = load_config(cfg_path)
+    assert cfg.mute is False  # defaults
+
+    cfg_path.write_text("null")
+    cfg2 = load_config(cfg_path)
+    assert cfg2.mute is False
+
+
+def test_default_config_is_stable() -> None:
+    assert DEFAULT_CONFIG == Config()

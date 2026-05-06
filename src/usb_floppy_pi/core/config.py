@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,14 +28,16 @@ def load_config(path: Path) -> Config:
     if not path.exists():
         return Config()
     try:
-        data: dict[str, Any] = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as exc:
+        data: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
         logger.warning("config %s unreadable (%s); using defaults", path, exc)
+        return Config()
+    if not isinstance(data, dict):
+        logger.warning("config %s is not a JSON object; using defaults", path)
         return Config()
     defaults = asdict(DEFAULT_CONFIG)
     merged = {**defaults, **data}
-    # Drop unknown keys to avoid Config() TypeError
-    known_keys = {f.name for f in Config.__dataclass_fields__.values()}
+    known_keys = set(Config.__dataclass_fields__)
     filtered = {k: v for k, v in merged.items() if k in known_keys}
     return Config(**filtered)
 
@@ -45,7 +47,7 @@ def save_config(path: Path, cfg: Config) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     payload = json.dumps(asdict(cfg), indent=2)
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(payload)
         f.flush()
         os.fsync(f.fileno())
