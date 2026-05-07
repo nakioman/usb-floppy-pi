@@ -53,7 +53,11 @@ class ConfigFsBackend:
         # Function: mass_storage.usb0
         func = g / "functions" / "mass_storage.usb0"
         func.mkdir(parents=True, exist_ok=True)
-        _write(func / "stall", "1")
+        # stall=0 — kernel docs recommend stall=1, but Windows' Mass Storage
+        # driver does not handle bulk endpoint stalls well and produces
+        # "Code 10" device-cannot-start errors. Pi-Floppy and similar projects
+        # use stall=0 for cross-host compatibility.
+        _write(func / "stall", "0")
         # LUN 0
         lun = func / "lun.0"
         lun.mkdir(parents=True, exist_ok=True)
