@@ -2736,6 +2736,48 @@ static void fsg_lun_release(struct device *dev)
 	/* Nothing needs to be done */
 }
 
+/* === usb-floppy-pi: bridge to userspace sysfs class in g_floppy.ko ===
+ *
+ * `struct fsg_common` is private to this translation unit. The sysfs class
+ * registered by g_floppy.ko needs to call fsg_show_file / fsg_store_file etc.
+ * which require a filesem pointer that's a member of fsg_common. Rather than
+ * leak the full fsg_common layout, we expose a tiny set of "active common"
+ * helpers — set when fsg_common_setup succeeds, cleared when freed.
+ *
+ * The model assumes one active fsg_common at a time, which is true for our
+ * single-purpose g_floppy gadget.
+ */
+static struct fsg_common *floppy_active_common;
+
+ssize_t floppy_lun_show_file(struct fsg_lun *lun, char *buf)
+{
+	if (!floppy_active_common) return scnprintf(buf, PAGE_SIZE, "\n");
+	return fsg_show_file(lun, &floppy_active_common->filesem, buf);
+}
+EXPORT_SYMBOL_GPL(floppy_lun_show_file);
+
+ssize_t floppy_lun_store_file(struct fsg_lun *lun, const char *buf, size_t count)
+{
+	if (!floppy_active_common) return -ENODEV;
+	return fsg_store_file(lun, &floppy_active_common->filesem, buf, count);
+}
+EXPORT_SYMBOL_GPL(floppy_lun_store_file);
+
+ssize_t floppy_lun_store_ro(struct fsg_lun *lun, const char *buf, size_t count)
+{
+	if (!floppy_active_common) return -ENODEV;
+	return fsg_store_ro(lun, &floppy_active_common->filesem, buf, count);
+}
+EXPORT_SYMBOL_GPL(floppy_lun_store_ro);
+
+struct fsg_lun *floppy_active_lun0(void)
+{
+	if (!floppy_active_common) return NULL;
+	return floppy_active_common->luns[0];
+}
+EXPORT_SYMBOL_GPL(floppy_active_lun0);
+/* === end usb-floppy-pi additions === */
+
 static struct fsg_common *fsg_common_setup(struct fsg_common *common)
 {
 	if (!common) {
@@ -2753,6 +2795,9 @@ static struct fsg_common *fsg_common_setup(struct fsg_common *common)
 	init_waitqueue_head(&common->fsg_wait);
 	common->state = FSG_STATE_TERMINATED;
 	memset(common->luns, 0, sizeof(common->luns));
+
+	/* usb-floppy-pi: track the active common for the sysfs bridge. */
+	floppy_active_common = common;
 
 	return common;
 }
@@ -3035,6 +3080,10 @@ EXPORT_SYMBOL_GPL(fsg_common_set_inquiry_string);
 static void fsg_common_release(struct fsg_common *common)
 {
 	int i;
+
+	/* usb-floppy-pi: clear the active-common pointer if it points at us. */
+	if (floppy_active_common == common)
+		floppy_active_common = NULL;
 
 	/* If the thread isn't already dead, tell it to exit now */
 	if (common->state != FSG_STATE_TERMINATED) {

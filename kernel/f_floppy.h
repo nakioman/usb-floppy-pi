@@ -141,4 +141,16 @@ void fsg_config_from_params(struct fsg_config *cfg,
 			    const struct fsg_module_parameters *params,
 			    unsigned int fsg_num_buffers);
 
+/* usb-floppy-pi: bridges to the sysfs class registered by g_floppy.ko.
+ * These wrap the storage_common.c helpers, supplying the filesem from the
+ * "active" fsg_common (private to f_floppy.c). Return -ENODEV if no common
+ * has been allocated yet. */
+ssize_t floppy_lun_show_file(struct fsg_lun *lun, char *buf);
+ssize_t floppy_lun_store_file(struct fsg_lun *lun, const char *buf, size_t count);
+ssize_t floppy_lun_store_ro(struct fsg_lun *lun, const char *buf, size_t count);
+
+/* Get the active LUN 0, or NULL if no fsg_common has been allocated.
+ * Avoids exposing the full fsg_common layout to consumers. */
+struct fsg_lun *floppy_active_lun0(void);
+
 #endif /* USB_F_FLOPPY_H */

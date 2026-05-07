@@ -27,6 +27,9 @@
 #include <linux/kernel.h>
 #include <linux/usb/ch9.h>
 #include <linux/module.h>
+#include <linux/device.h>
+#include <linux/sysfs.h>
+#include "storage_common.h"
 
 /*-------------------------------------------------------------------------*/
 
@@ -81,6 +84,124 @@ static struct usb_gadget_strings *dev_strings[] = {
 
 static struct usb_function_instance *fi_msg;
 static struct usb_function *f_msg;
+
+/* === usb-floppy-pi sysfs class ===
+ * Exposes /sys/class/usb_floppy/usb-floppy-pi/{lun0_file,lun0_ro,lun0_inquiry_string}
+ * for userspace runtime control. Each show/store callback delegates to the
+ * floppy_lun_xxx() bridges declared in f_floppy.h, which in turn call the
+ * exported fsg_show_X / fsg_store_X helpers from storage_common.c with the
+ * filesem from the active fsg_common (which is private to f_floppy.c).
+ */
+
+static struct class *usb_floppy_class;
+static struct device *usb_floppy_dev;
+
+/* fsg_common is private to f_floppy.c, so we go through bridges declared
+ * in f_floppy.h (floppy_active_lun0, floppy_lun_*) instead of touching the
+ * fsg_common layout directly. */
+
+static ssize_t lun0_file_show(struct device *d, struct device_attribute *a,
+			       char *buf)
+{
+	struct fsg_lun *lun = floppy_active_lun0();
+	if (!lun) return scnprintf(buf, PAGE_SIZE, "\n");
+	return floppy_lun_show_file(lun, buf);
+}
+
+static ssize_t lun0_file_store(struct device *d, struct device_attribute *a,
+				const char *buf, size_t count)
+{
+	struct fsg_lun *lun = floppy_active_lun0();
+	if (!lun) return -ENODEV;
+	return floppy_lun_store_file(lun, buf, count);
+}
+static DEVICE_ATTR_RW(lun0_file);
+
+static ssize_t lun0_ro_show(struct device *d, struct device_attribute *a,
+			     char *buf)
+{
+	struct fsg_lun *lun = floppy_active_lun0();
+	if (!lun) return scnprintf(buf, PAGE_SIZE, "0\n");
+	return fsg_show_ro(lun, buf);
+}
+
+static ssize_t lun0_ro_store(struct device *d, struct device_attribute *a,
+			      const char *buf, size_t count)
+{
+	struct fsg_lun *lun = floppy_active_lun0();
+	if (!lun) return -ENODEV;
+	return floppy_lun_store_ro(lun, buf, count);
+}
+static DEVICE_ATTR_RW(lun0_ro);
+
+static ssize_t lun0_inquiry_string_show(struct device *d,
+				struct device_attribute *a, char *buf)
+{
+	struct fsg_lun *lun = floppy_active_lun0();
+	if (!lun) return scnprintf(buf, PAGE_SIZE, "\n");
+	return fsg_show_inquiry_string(lun, buf);
+}
+
+static ssize_t lun0_inquiry_string_store(struct device *d,
+				struct device_attribute *a,
+				const char *buf, size_t count)
+{
+	struct fsg_lun *lun = floppy_active_lun0();
+	if (!lun) return -ENODEV;
+	return fsg_store_inquiry_string(lun, buf, count);
+}
+static DEVICE_ATTR_RW(lun0_inquiry_string);
+
+static struct attribute *usb_floppy_attrs[] = {
+	&dev_attr_lun0_file.attr,
+	&dev_attr_lun0_ro.attr,
+	&dev_attr_lun0_inquiry_string.attr,
+	NULL,
+};
+
+static const struct attribute_group usb_floppy_group = {
+	.attrs = usb_floppy_attrs,
+};
+static const struct attribute_group *usb_floppy_groups[] = {
+	&usb_floppy_group,
+	NULL,
+};
+
+static int usb_floppy_sysfs_register(void)
+{
+	int err;
+
+	usb_floppy_class = class_create("usb_floppy");
+	if (IS_ERR(usb_floppy_class))
+		return PTR_ERR(usb_floppy_class);
+
+	usb_floppy_dev = device_create_with_groups(usb_floppy_class, NULL,
+						   MKDEV(0, 0), NULL,
+						   usb_floppy_groups,
+						   "usb-floppy-pi");
+	if (IS_ERR(usb_floppy_dev)) {
+		err = PTR_ERR(usb_floppy_dev);
+		usb_floppy_dev = NULL;
+		class_destroy(usb_floppy_class);
+		usb_floppy_class = NULL;
+		return err;
+	}
+	pr_info("g_floppy: /sys/class/usb_floppy/usb-floppy-pi registered\n");
+	return 0;
+}
+
+static void usb_floppy_sysfs_unregister(void)
+{
+	if (usb_floppy_dev) {
+		device_destroy(usb_floppy_class, MKDEV(0, 0));
+		usb_floppy_dev = NULL;
+	}
+	if (usb_floppy_class) {
+		class_destroy(usb_floppy_class);
+		usb_floppy_class = NULL;
+	}
+}
+/* === end usb-floppy-pi sysfs class === */
 
 /****************************** Configurations ******************************/
 
@@ -191,6 +312,15 @@ static int msg_bind(struct usb_composite_dev *cdev)
 	usb_composite_overwrite_options(cdev, &coverwrite);
 	dev_info(&cdev->gadget->dev,
 		 DRIVER_DESC ", version: " DRIVER_VERSION "\n");
+
+	/* usb-floppy-pi: register the sysfs class so userspace can talk to us. */
+	{
+		int sysfs_err = usb_floppy_sysfs_register();
+		if (sysfs_err)
+			dev_warn(&cdev->gadget->dev,
+				"g_floppy: sysfs class registration failed (%d), continuing\n",
+				sysfs_err);
+	}
 	return 0;
 
 fail_otg_desc:
@@ -207,6 +337,10 @@ fail:
 
 static int msg_unbind(struct usb_composite_dev *cdev)
 {
+	/* usb-floppy-pi: unregister sysfs class first so userspace can't access
+	 * it during the teardown of fi_msg/f_msg. */
+	usb_floppy_sysfs_unregister();
+
 	if (!IS_ERR(f_msg))
 		usb_put_function(f_msg);
 

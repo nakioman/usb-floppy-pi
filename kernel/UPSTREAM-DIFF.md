@@ -68,3 +68,15 @@ change vs upstream.)
   dmesg correctly: "bInterfaceSubClass = 0x04 (UFI)" or "0x06 (SCSI)".
   This is the core Phase 2.2 win — Windows now treats the device as a
   Floppy Disk Drive regardless of media presence.
+- 2026-05-07: f_floppy.c — added `floppy_active_common` bridge (single
+  active fsg_common pointer set by fsg_common_setup, cleared by
+  fsg_common_release) plus three EXPORT_SYMBOL_GPL bridges:
+  floppy_lun_show_file/store_file/store_ro and floppy_active_lun0().
+  These hide the private fsg_common layout from g_floppy.ko, which only
+  needs to call show/store helpers. f_floppy.h declares the bridges.
+- 2026-05-07: g_floppy_main.c — registered sysfs class
+  /sys/class/usb_floppy/usb-floppy-pi/ with attrs lun0_file (rw),
+  lun0_ro (rw), lun0_inquiry_string (rw). Registered in msg_bind after
+  fi_msg is set; unregistered in msg_unbind. Verified all three attrs
+  read/write correctly: cat returns the current value, echo writes it.
+  Empty write to lun0_file ejects the medium, non-empty mounts.
