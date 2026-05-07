@@ -13,6 +13,7 @@ throttling, and a kernel-side buzzer.
 | `storage_common.c`     | `drivers/usb/gadget/function/storage_common.c`            |
 | `storage_common.h`     | `drivers/usb/gadget/function/storage_common.h`            |
 | `g_floppy_main.c`      | `drivers/usb/gadget/legacy/mass_storage.c`                |
+| `configfs.h`           | `drivers/usb/gadget/configfs.h` (internal kernel header)  |
 
 ## License
 
@@ -43,3 +44,12 @@ change vs upstream.)
   - storage_common.c bInterfaceClass = USB_CLASS_MASS_STORAGE kept — that's
     the USB class constant 0x08 which is correct for floppy too. Only the
     SubClass changes (Task 6 will set it to USB_SC_UFI).
+- 2026-05-07: Added kernel/configfs.h (forked from drivers/usb/gadget/configfs.h)
+  because f_mass_storage.c references it for its configfs-based gadget setup
+  path. We don't *use* configfs in Phase 2 (the legacy gadget approach
+  initializes via fsg_config_from_params instead) but the file must compile
+  the same code path nonetheless.
+- 2026-05-07: Built two .ko files via Kbuild — usb_f_floppy.ko (registers
+  function "floppy") and g_floppy.ko (legacy gadget that requests it).
+  modinfo of g_floppy declares depends=usb_f_floppy,libcomposite, so depmod
+  will auto-load the function module on `modprobe g_floppy`.
