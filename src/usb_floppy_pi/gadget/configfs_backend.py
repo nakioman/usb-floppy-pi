@@ -149,7 +149,10 @@ class ConfigFsBackend:
         lun = self.gadget_dir / "functions" / "mass_storage.usb0" / "lun.0"
 
         # Detach the current backing file (no-op if already detached).
-        _write(lun / "file", "")
+        # Note: we write "\n", not "" — pathlib's write_text("") issues a
+        # zero-byte write which configfs treats as no-op and never invokes
+        # the kernel's store handler. The handler trims trailing \n to "".
+        _write(lun / "file", "\n")
 
         if file is None:
             # Eject: leave `ro` alone. Setting it would race the kernel's LUN
