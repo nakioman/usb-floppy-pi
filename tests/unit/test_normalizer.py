@@ -3,7 +3,6 @@ import zipfile
 from pathlib import Path
 
 from usb_floppy_pi.storage.normalizer import (
-    NormalizationResult,
     is_image_file,
     normalize_arrived_file,
 )
@@ -93,7 +92,9 @@ def test_normalize_imz_picks_first_valid_image(tmp_path: Path) -> None:
         zf.write(readme, arcname="readme.txt")
         zf.write(valid, arcname="DISK01.ima")
         zf.write(big, arcname="other.ima")
-    big.unlink(); readme.unlink(); valid.unlink()
+    big.unlink()
+    readme.unlink()
+    valid.unlink()
     result = normalize_arrived_file(archive)
     assert result.kind == "extracted"
     assert result.final_path.read_bytes() == b"valid-content"
