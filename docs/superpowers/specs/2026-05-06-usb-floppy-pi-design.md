@@ -536,9 +536,14 @@ El gadget `mass_storage` del kernel Linux solo soporta:
 - `bInterfaceSubClass = 0x06` (SCSI transparent)
 - `bInterfaceProtocol = 0x50` (Bulk-Only Transport / BBB)
 
-Un USB-FDD "puro" usa subclass `0x04` (UFI) y protocol `0x00` (CBI). Implementarlo requeriría un gadget driver custom en C, fuera de scope.
+Un USB-FDD "puro" como el TEAC FD-05PUW usa subclass `0x04` (UFI) y protocol `0x00` (CBI). El kernel Linux **hardcodea** SubClass=06; no hay forma de cambiarlo desde configfs. Implementarlo requeriría un gadget driver UFI custom en C (Phase 4).
 
-**Por qué esto no es un problema en la práctica:** los BIOSes modernos (incluyendo la H55) y Windows reconocen como floppy cualquier dispositivo SCSI/BBB con `removable=1` + INQUIRY string conocida (TEAC FD-05PUW está en sus listas). El subclass UFI era importante en la era de Win95/Win98 pre-SP, pero desde Win98 SE en adelante el SCSI/BBB con INQUIRY de floppy funciona igual de bien.
+**Comportamiento práctico observado:**
+- **Con disco montado**: el host hace `READ_CAPACITY`, ve 1.44 MB, lo identifica como floppy ✓
+- **Sin disco** (`lun.0/file` vacío): el host no puede leer capacidad, **Windows moderno cae a "USB removable drive genérico"** y pierde el tipo "Floppy".
+- **DOS / Win98 vía BIOS legacy emulation**: la BIOS opera a nivel INT 13h y enumera el dispositivo una sola vez al boot. Si al momento del boot hay un disco montado (que es lo que garantizamos con el pre-attach + `last_mounted` restore en §5.4), la BIOS asigna `A:` USB-FDD y mantiene esa identidad durante toda la sesión, independiente de mount/eject posteriores.
+
+**Mitigación documentada para Windows moderno:** mantener siempre un disco montado (mental model "Gotek con disquetes virtuales", no "drive vacío con cable USB"). El Phase 4 puede agregar opcionalmente un `blank.img` mounteable o un gadget UFI custom para resolver este caso permanentemente.
 
 #### Cambio de imagen sin re-enumerar
 
