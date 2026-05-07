@@ -234,10 +234,23 @@ def build_app(
         return {"set": target_dir.name, "results": results}
 
     if static_dir.exists():
+        # Static assets change frequently during development; serve them with
+        # no-cache so browsers always pull the latest after a deploy. The
+        # asset volume is tiny (one HTML + one JS), so caching wins nothing.
+        no_cache_headers = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+        @app.middleware("http")
+        async def _no_cache_static(request, call_next):
+            response = await call_next(request)
+            if request.url.path.startswith("/static") or request.url.path == "/":
+                for k, v in no_cache_headers.items():
+                    response.headers[k] = v
+            return response
 
         @app.get("/")
         def root() -> FileResponse:
-            return FileResponse(static_dir / "index.html")
+            return FileResponse(static_dir / "index.html", headers=no_cache_headers)
 
     return app
