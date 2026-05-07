@@ -201,13 +201,53 @@
 
 /*------------------------------------------------------------------------*/
 
-#define FSG_DRIVER_DESC		"Mass Storage Function"
-#define FSG_DRIVER_VERSION	"2009/09/11"
+#define FSG_DRIVER_DESC		"USB Floppy Function"
+#define FSG_DRIVER_VERSION	"0.1.0"
 
 static const char fsg_string_interface[] = "USB Floppy";
 
 #include "storage_common.h"
 #include "f_floppy.h"
+
+/* === usb-floppy-pi additions: configurable interface subclass ===
+ * The upstream f_mass_storage hardcodes bInterfaceSubClass = USB_SC_SCSI in
+ * storage_common.c's fsg_intf_desc. We default to USB_SC_UFI (USB-FDD), which
+ * makes Windows treat the device as a Floppy Disk Drive even when the LUN is
+ * empty — matching the behavior of a real TEAC FD-05PUW. The 'subclass' module
+ * param allows fallback to SCSI for hosts/BIOSes that reject UFI.
+ *
+ * The descriptor's value is written in fsg_bind(), which runs before the host
+ * reads the interface descriptor — see floppy_apply_subclass() below.
+ */
+#include <linux/moduleparam.h>
+#include <linux/usb/ch9.h>
+
+static char *floppy_subclass = "ufi";
+module_param_named(subclass, floppy_subclass, charp, 0444);
+MODULE_PARM_DESC(subclass,
+	"USB interface subclass: ufi (0x04, default — host treats as floppy) "
+	"or scsi (0x06, fallback for BIOSes that reject UFI)");
+
+static u8 floppy_resolve_subclass(void)
+{
+	if (!strcmp(floppy_subclass, "ufi"))
+		return USB_SC_UFI;
+	if (!strcmp(floppy_subclass, "scsi"))
+		return USB_SC_SCSI;
+	pr_warn("g_floppy: unknown subclass '%s'; falling back to ufi\n",
+		floppy_subclass);
+	return USB_SC_UFI;
+}
+
+static void floppy_apply_subclass(void)
+{
+	extern struct usb_interface_descriptor fsg_intf_desc;
+	fsg_intf_desc.bInterfaceSubClass = floppy_resolve_subclass();
+	pr_info("g_floppy: bInterfaceSubClass = 0x%02x (%s)\n",
+		fsg_intf_desc.bInterfaceSubClass,
+		fsg_intf_desc.bInterfaceSubClass == USB_SC_UFI ? "UFI" : "SCSI");
+}
+/* === end usb-floppy-pi additions === */
 
 /* Static strings, in UTF-8 (for simplicity we use only ASCII characters) */
 static struct usb_string		fsg_strings[] = {
@@ -3030,6 +3070,10 @@ static int fsg_bind(struct usb_configuration *c, struct usb_function *f)
 	unsigned		max_burst;
 	int			ret;
 	struct fsg_opts		*opts;
+
+	/* usb-floppy-pi: apply the user-selected interface subclass before any
+	 * descriptors are emitted to the host. */
+	floppy_apply_subclass();
 
 	/* Don't allow to bind if we don't have at least one LUN */
 	ret = _fsg_common_get_max_lun(common);

@@ -61,3 +61,10 @@ change vs upstream.)
   /sys/class/udc/<udc>/device/gadget*/lun0/ exposes file (rw), ro (rw),
   forced_eject, nofua. No inquiry_string at this path — Task 7+8 will add
   one via our own sysfs class.
+- 2026-05-07: f_floppy.c — added module param `subclass` (default "ufi",
+  fallback "scsi") + helper `floppy_apply_subclass()` that mutates the
+  exported `fsg_intf_desc.bInterfaceSubClass` at the start of `fsg_bind()`,
+  before any descriptor is sent to the host. Verified both modes log to
+  dmesg correctly: "bInterfaceSubClass = 0x04 (UFI)" or "0x06 (SCSI)".
+  This is the core Phase 2.2 win — Windows now treats the device as a
+  Floppy Disk Drive regardless of media presence.
