@@ -147,11 +147,21 @@ class ConfigFsBackend:
 
     def configure_lun(self, *, file: Path | None, ro: bool) -> None:
         lun = self.gadget_dir / "functions" / "mass_storage.usb0" / "lun.0"
-        # Always clear file before changing ro flag (kernel rejects ro change with file attached)
+
+        # Detach the current backing file (no-op if already detached).
         _write(lun / "file", "")
+
+        if file is None:
+            # Eject: leave `ro` alone. Setting it would race the kernel's LUN
+            # release and produce EBUSY when the host (e.g. Windows) is mid-IO,
+            # and `ro` is meaningless without a backing file anyway.
+            return
+
+        # Attach a new backing file. The kernel rejects `ro` writes while the
+        # LUN is "open", so wait briefly for it to settle after the detach.
+        time.sleep(0.05)
         _write(lun / "ro", "1" if ro else "0")
-        if file is not None:
-            _write(lun / "file", str(file))
+        _write(lun / "file", str(file))
 
     def attach_to_udc(self) -> None:
         udc_path = self.gadget_dir / "UDC"
