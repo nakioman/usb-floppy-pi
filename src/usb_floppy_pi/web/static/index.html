@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>USB Floppy Pi</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 1rem;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+        h1 { color: #ffaa00; font-size: 1.4rem; }
+        .status {
+            background: #2a2a2a;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            border-left: 4px solid #ffaa00;
+        }
+        .status.mounted { border-left-color: #4caf50; }
+        .set {
+            background: #252525;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 6px;
+        }
+        .set h3 { margin: 0 0 0.5rem 0; font-size: 1rem; }
+        .ro-badge { color: #ff9800; font-size: 0.8rem; margin-left: 0.5rem; }
+        .disk { display: flex; gap: 0.5rem; margin: 0.25rem 0; align-items: center; }
+        .disk-name { flex-grow: 1; font-family: monospace; }
+        button {
+            background: #ffaa00;
+            color: #1a1a1a;
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover { background: #ffbb33; }
+        button.danger { background: #e53935; color: white; }
+        button.session { background: #5c6bc0; color: white; }
+        button.mounted { background: #4caf50; color: white; }
+        .upload-form {
+            background: #2a2a2a;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-top: 1rem;
+        }
+        select, input[type=file] {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            padding: 0.4rem;
+            border-radius: 4px;
+        }
+        .error { color: #e53935; margin-top: 0.5rem; }
+    </style>
+</head>
+<body>
+    <h1>USB Floppy Pi</h1>
+    <div id="status" class="status">Loading...</div>
+    <div id="sets-container"></div>
+
+    <div class="upload-form">
+        <h3 style="margin-top: 0">Upload image</h3>
+        <select id="upload-set"></select>
+        <input type="file" id="upload-file" accept=".img,.ima,.imz">
+        <button onclick="doUpload()">Upload</button>
+        <div id="upload-error" class="error"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
