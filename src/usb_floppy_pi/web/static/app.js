@@ -31,6 +31,14 @@ function renderStatus(state) {
     }
 }
 
+function makeButton(label, className, onClick) {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    if (className) btn.className = className;
+    btn.addEventListener("click", onClick);
+    return btn;
+}
+
 function renderSets(sets, mounted) {
     const container = document.getElementById("sets-container");
     container.innerHTML = "";
@@ -41,26 +49,53 @@ function renderSets(sets, mounted) {
     for (const s of sets) {
         const div = document.createElement("div");
         div.className = "set";
-        const roBadge = s.read_only ? `<span class="ro-badge">[RO]</span>` : "";
-        const roButton = s.read_only
-            ? `<button onclick="setReadOnly('${escape(s.name)}', false)">Make writable</button>`
-            : `<button onclick="setReadOnly('${escape(s.name)}', true)">Make read-only</button>`;
-        let html = `<h3>${escapeHtml(s.name)}${roBadge}</h3>`;
-        html += s.disks.map(d => {
-            const isMounted = mounted && mounted.set_name === s.name && mounted.disk_filename === d;
-            const cls = isMounted ? "mounted" : "";
-            return `<div class="disk">
-                <span class="disk-name">${escapeHtml(d)}</span>
-                <button class="${cls}" onclick="mount('${escape(s.name)}', '${escape(d)}', false)">${isMounted ? "Mounted" : "Mount"}</button>
-                <button class="session" onclick="mount('${escape(s.name)}', '${escape(d)}', true)">Session</button>
-            </div>`;
-        }).join("");
-        html += `<div style="margin-top: 0.5rem">${roButton}`;
-        if (mounted) {
-            html += ` <button class="danger" onclick="eject()">Eject</button>`;
+
+        const h3 = document.createElement("h3");
+        h3.textContent = s.name;
+        if (s.read_only) {
+            const badge = document.createElement("span");
+            badge.className = "ro-badge";
+            badge.textContent = " [RO]";
+            h3.appendChild(badge);
         }
-        html += `</div>`;
-        div.innerHTML = html;
+        div.appendChild(h3);
+
+        for (const d of s.disks) {
+            const isMounted = mounted && mounted.set_name === s.name && mounted.disk_filename === d;
+            const row = document.createElement("div");
+            row.className = "disk";
+
+            const name = document.createElement("span");
+            name.className = "disk-name";
+            name.textContent = d;
+            row.appendChild(name);
+
+            row.appendChild(makeButton(
+                isMounted ? "Mounted" : "Mount",
+                isMounted ? "mounted" : "",
+                () => mount(s.name, d, false),
+            ));
+            row.appendChild(makeButton(
+                "Session",
+                "session",
+                () => mount(s.name, d, true),
+            ));
+            div.appendChild(row);
+        }
+
+        const actions = document.createElement("div");
+        actions.style.marginTop = "0.5rem";
+        actions.appendChild(makeButton(
+            s.read_only ? "Make writable" : "Make read-only",
+            "",
+            () => setReadOnly(s.name, !s.read_only),
+        ));
+        if (mounted) {
+            actions.appendChild(document.createTextNode(" "));
+            actions.appendChild(makeButton("Eject", "danger", () => eject()));
+        }
+        div.appendChild(actions);
+
         container.appendChild(div);
     }
 }
@@ -125,11 +160,7 @@ async function doUpload() {
     }
 }
 
-function escapeHtml(s) {
-    return s.replace(/[<>&"']/g, c => ({
-        "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;"
-    })[c]);
-}
+document.getElementById("upload-button")?.addEventListener("click", doUpload);
 
 // Refresh every 3 seconds + on load
 refresh().catch(e => {
