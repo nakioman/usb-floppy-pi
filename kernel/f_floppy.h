@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-#ifndef USB_F_MASS_STORAGE_H
-#define USB_F_MASS_STORAGE_H
+#ifndef USB_F_FLOPPY_H
+#define USB_F_FLOPPY_H
 
 #include <linux/usb/composite.h>
 #include "storage_common.h"
@@ -141,4 +141,4 @@ void fsg_config_from_params(struct fsg_config *cfg,
 			    const struct fsg_module_parameters *params,
 			    unsigned int fsg_num_buffers);
 
-#endif /* USB_F_MASS_STORAGE_H */
+#endif /* USB_F_FLOPPY_H */

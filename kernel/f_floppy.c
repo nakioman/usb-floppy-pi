@@ -204,10 +204,10 @@
 #define FSG_DRIVER_DESC		"Mass Storage Function"
 #define FSG_DRIVER_VERSION	"2009/09/11"
 
-static const char fsg_string_interface[] = "Mass Storage";
+static const char fsg_string_interface[] = "USB Floppy";
 
 #include "storage_common.h"
-#include "f_mass_storage.h"
+#include "f_floppy.h"
 
 /* Static strings, in UTF-8 (for simplicity we use only ASCII characters) */
 static struct usb_string		fsg_strings[] = {
@@ -3575,10 +3575,10 @@ static struct usb_function *fsg_alloc(struct usb_function_instance *fi)
 	return &fsg->function;
 }
 
-DECLARE_USB_FUNCTION_INIT(mass_storage, fsg_alloc_inst, fsg_alloc);
-MODULE_DESCRIPTION("Mass Storage USB Composite Function");
+DECLARE_USB_FUNCTION_INIT(floppy, fsg_alloc_inst, fsg_alloc);
+MODULE_DESCRIPTION("USB Floppy Pi Function");
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Michal Nazarewicz");
+MODULE_AUTHOR("usb-floppy-pi (forked from f_mass_storage by Michal Nazarewicz)");
 
 /************************* Module parameters *************************/
 

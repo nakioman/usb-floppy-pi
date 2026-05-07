@@ -30,8 +30,8 @@
 
 /*-------------------------------------------------------------------------*/
 
-#define DRIVER_DESC		"Mass Storage Gadget"
-#define DRIVER_VERSION		"2009/09/11"
+#define DRIVER_DESC		"USB Floppy Pi Gadget"
+#define DRIVER_VERSION		"0.1.0"
 
 /*
  * Thanks to NetChip Technologies for donating this product ID.
@@ -42,7 +42,7 @@
 #define FSG_VENDOR_ID	0x0525	/* NetChip */
 #define FSG_PRODUCT_ID	0xa4a5	/* Linux-USB File-backed Storage Gadget */
 
-#include "f_mass_storage.h"
+#include "f_floppy.h"
 
 /*-------------------------------------------------------------------------*/
 USB_GADGET_COMPOSITE_OPTIONS();
@@ -142,7 +142,7 @@ static int msg_bind(struct usb_composite_dev *cdev)
 	struct fsg_config config;
 	int status;
 
-	fi_msg = usb_get_function_instance("mass_storage");
+	fi_msg = usb_get_function_instance("floppy");
 	if (IS_ERR(fi_msg))
 		return PTR_ERR(fi_msg);
 
@@ -222,7 +222,7 @@ static int msg_unbind(struct usb_composite_dev *cdev)
 /****************************** Some noise ******************************/
 
 static struct usb_composite_driver msg_driver = {
-	.name		= "g_mass_storage",
+	.name		= "g_floppy",
 	.dev		= &msg_device_desc,
 	.max_speed	= USB_SPEED_SUPER_PLUS,
 	.needs_serial	= 1,
