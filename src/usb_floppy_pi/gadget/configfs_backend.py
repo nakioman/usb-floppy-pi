@@ -65,8 +65,11 @@ class ConfigFsBackend:
         # Configuration 1
         cfg = g / "configs" / "c.1"
         cfg.mkdir(parents=True, exist_ok=True)
-        _write(cfg / "MaxPower", "2")
-        _write(cfg / "bmAttributes", "0xC0")
+        # Bus-powered (we draw from the host USB), no remote wakeup. 250 mA
+        # matches a real USB floppy drive; declaring self-powered + 4 mA was
+        # making Windows allocate 0 mA to the device and fail with Code 10.
+        _write(cfg / "MaxPower", "250")
+        _write(cfg / "bmAttributes", "0x80")
         cfg_strings = cfg / "strings" / "0x409"
         cfg_strings.mkdir(parents=True, exist_ok=True)
         _write(cfg_strings / "configuration", "USB Floppy Config")

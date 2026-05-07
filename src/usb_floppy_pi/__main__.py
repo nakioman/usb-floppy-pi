@@ -78,7 +78,11 @@ async def build_runtime(
     await library.start()
 
     controller = GadgetController(gadget_backend, _build_gadget_params())
-    await controller.initialize()
+    # Build the gadget tree first, but don't expose it to the host yet — we
+    # want to pre-load the last image so the very first thing the host sees
+    # is a media-present device. Some hosts (Windows) refuse to recover from
+    # an initial "no medium" enumeration.
+    await controller.create_only()
 
     if cfg.last_mounted is not None:
         target_set_name = cfg.last_mounted.get("set")
@@ -96,6 +100,9 @@ async def build_runtime(
             break
         if controller.current is None:
             logger.info("last_mounted %s/%s no longer present", target_set_name, target_disk_name)
+
+    # Now expose the gadget to the host (with image already attached if there was one).
+    await controller.activate()
 
     # Subscribe to changes so we persist last_mounted whenever it changes.
     def _persist_last_mounted() -> None:

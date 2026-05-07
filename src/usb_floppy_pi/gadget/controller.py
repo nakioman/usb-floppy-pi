@@ -45,7 +45,26 @@ class GadgetController:
         return self._current
 
     async def initialize(self) -> None:
+        """Create the gadget tree and immediately attach to UDC.
+
+        Most callers should prefer the split form (`create_only` + `activate`)
+        so they can pre-load a backing image before the host enumerates,
+        avoiding a "no media" first impression that some hosts (Windows)
+        fail to recover from.
+        """
         self._backend.create_gadget(self._params)
+        self._backend.attach_to_udc()
+
+    async def create_only(self) -> None:
+        """Create the gadget tree without attaching to a UDC.
+
+        After this, callers may `mount` an image so the LUN is pre-populated
+        before `activate` exposes the device to the host.
+        """
+        self._backend.create_gadget(self._params)
+
+    async def activate(self) -> None:
+        """Attach the (already-created) gadget to a UDC and expose it to the host."""
         self._backend.attach_to_udc()
 
     async def shutdown(self) -> None:
