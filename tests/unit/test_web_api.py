@@ -183,3 +183,17 @@ def test_post_upload_corrupted_imz_returns_400(app_with_data, tmp_path: Path) ->
             files={"file": ("BROKEN.imz", b"not a zip", "application/zip")},
         )
         assert r.status_code == 400
+
+
+def test_post_upload_oversize_returns_413(app_with_data, tmp_path: Path) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        # 3 MB .img upload (over the 2MB cap)
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files={"file": ("HUGE.img", b"\x00" * (3 * 1024 * 1024), "application/octet-stream")},
+        )
+        assert r.status_code == 413
+        # The partial file must not survive
+        assert not (tmp_path / "DOS 6.22" / "HUGE.img").exists()

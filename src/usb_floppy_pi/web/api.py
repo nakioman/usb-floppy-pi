@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
+import anyio
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +19,8 @@ from ..storage.models import FloppySet
 from ..storage.normalizer import normalize_arrived_file
 
 logger = logging.getLogger(__name__)
+
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB — generous for .imz of a 1.44MB floppy
 
 
 class MountRequest(BaseModel):
@@ -114,8 +117,25 @@ def build_app(
         s = _set_by_name(set)
         if file.filename is None:
             raise HTTPException(status_code=400, detail="missing filename")
+
+        # Stream-with-cap so we never OOM
         target = s.path / file.filename
-        target.write_bytes(await file.read())
+        total = 0
+        async with await anyio.open_file(target, "wb") as out:
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    await out.aclose()
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"upload exceeds max size ({MAX_UPLOAD_BYTES} bytes)",
+                    )
+                await out.write(chunk)
+
         result = normalize_arrived_file(target)
         if result.kind == "error":
             raise HTTPException(status_code=400, detail=result.detail)
