@@ -34,8 +34,11 @@ class ConfigFsBackend:
     def create_gadget(self, params: GadgetParams) -> None:
         g = self.gadget_dir
         if g.exists():
-            logger.info("gadget %s already exists; reusing", g)
-            return
+            if self._is_well_formed(params):
+                logger.info("gadget %s already configured; reusing", g)
+                return
+            logger.warning("gadget %s exists but appears malformed; rebuilding", g)
+            self.destroy_gadget()
         g.mkdir(parents=True)
         _write(g / "idVendor", f"0x{params.id_vendor:04x}")
         _write(g / "idProduct", f"0x{params.id_product:04x}")
@@ -72,6 +75,19 @@ class ConfigFsBackend:
         if not link.exists():
             link.symlink_to(func)
         logger.info("gadget tree created at %s", g)
+
+    def _is_well_formed(self, params: GadgetParams) -> bool:
+        """Check key markers that indicate a fully-built gadget."""
+        g = self.gadget_dir
+        inquiry_path = g / "functions" / "mass_storage.usb0" / "lun.0" / "inquiry_string"
+        if not inquiry_path.exists():
+            return False
+        try:
+            current = inquiry_path.read_text().strip()
+        except OSError:
+            return False
+        # configfs trims trailing whitespace; compare prefix to the configured string trimmed
+        return current.strip() == params.inquiry_string.strip()
 
     def destroy_gadget(self) -> None:
         g = self.gadget_dir
