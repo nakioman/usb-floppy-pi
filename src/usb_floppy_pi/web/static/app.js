@@ -31,6 +31,12 @@ function renderStatus(state) {
     }
 }
 
+function escapeHtml(s) {
+    return String(s).replace(/[<>&"']/g, c => ({
+        "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;"
+    })[c]);
+}
+
 function makeButton(label, className, onClick) {
     const btn = document.createElement("button");
     btn.textContent = label;
