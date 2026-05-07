@@ -1,4 +1,5 @@
 """Tests for storage.normalizer."""
+
 import zipfile
 from pathlib import Path
 

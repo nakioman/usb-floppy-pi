@@ -1,4 +1,5 @@
 """Async wrapper around watchdog for filesystem change events."""
+
 from __future__ import annotations
 
 import asyncio

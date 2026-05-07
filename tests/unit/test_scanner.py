@@ -1,4 +1,5 @@
 """Tests for storage.scanner."""
+
 from pathlib import Path
 
 from usb_floppy_pi.storage.scanner import scan
@@ -30,9 +31,7 @@ def test_scan_multi_disk_sorted_alphabetically(tmp_path: Path) -> None:
     (set_dir / "DISK001.img").write_bytes(b"")
     (set_dir / "DISK003.img").write_bytes(b"")
     sets = scan(tmp_path)
-    assert [d.name for d in sets[0].disks] == [
-        "DISK001.img", "DISK002.img", "DISK003.img"
-    ]
+    assert [d.name for d in sets[0].disks] == ["DISK001.img", "DISK002.img", "DISK003.img"]
 
 
 def test_scan_ro_marker(tmp_path: Path) -> None:

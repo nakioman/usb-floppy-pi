@@ -1,4 +1,5 @@
 """FastAPI application factory."""
+
 from __future__ import annotations
 
 import logging
@@ -54,21 +55,30 @@ def build_app(
 
     @app.get("/api/sets")
     def get_sets() -> dict:
-        return {"sets": [
-            {
-                "name": s.name,
-                "read_only": s.read_only,
-                "disks": [d.name for d in s.disks],
-            }
-            for s in library.sets
-        ]}
+        return {
+            "sets": [
+                {
+                    "name": s.name,
+                    "read_only": s.read_only,
+                    "disks": [d.name for d in s.disks],
+                }
+                for s in library.sets
+            ]
+        }
 
     @app.get("/api/state")
     def get_state() -> dict:
         m = controller.current
-        return {"mounted": (asdict(m) | {
-            "backing_path": str(m.backing_path),
-        }) if m else None}
+        return {
+            "mounted": (
+                asdict(m)
+                | {
+                    "backing_path": str(m.backing_path),
+                }
+            )
+            if m
+            else None
+        }
 
     @app.post("/api/mount")
     async def post_mount(req: MountRequest) -> dict:

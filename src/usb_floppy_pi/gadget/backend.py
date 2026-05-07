@@ -1,4 +1,5 @@
 """GadgetBackend protocol + MockBackend for testing."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

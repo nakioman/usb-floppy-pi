@@ -1,4 +1,5 @@
 """Tests for storage.models — pure dataclasses, no behavior."""
+
 from pathlib import Path
 
 from usb_floppy_pi.storage.models import FloppySet, MountedImage

@@ -5,6 +5,7 @@
 - .imz → extract inner image, write as .img, delete .imz
 - anything else → ignored
 """
+
 from __future__ import annotations
 
 import logging
@@ -83,7 +84,8 @@ def _extract_imz(archive: Path) -> NormalizationResult:
                 break
             if inner_member is None:
                 return NormalizationResult(
-                    "error", archive,
+                    "error",
+                    archive,
                     "no valid image inside .imz (need .img/.ima ≤1.44MB)",
                 )
             target = archive.with_suffix(".img")

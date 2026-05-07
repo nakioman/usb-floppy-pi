@@ -1,4 +1,5 @@
 """Tests for gadget.controller using MockBackend."""
+
 from pathlib import Path
 
 import pytest
@@ -14,8 +15,12 @@ from usb_floppy_pi.storage.models import FloppySet, MountedImage
 
 def _params() -> GadgetParams:
     return GadgetParams(
-        id_vendor=0x0644, id_product=0x0000, bcd_device=0x3000,
-        manufacturer="TEAC", product="USB Floppy", serial="0001",
+        id_vendor=0x0644,
+        id_product=0x0000,
+        bcd_device=0x3000,
+        manufacturer="TEAC",
+        product="USB Floppy",
+        serial="0001",
         inquiry_string="TEAC    FD-05PUW         3000",
     )
 
@@ -107,10 +112,15 @@ async def test_swap_disk_within_set(tmp_path: Path) -> None:
     backend = MockBackend()
     ctrl = GadgetController(backend, _params())
     await ctrl.initialize()
-    fset = _make_set(tmp_path, "DOS", ro=False, disks=[
-        ("DISK1.img", FLOPPY_SIZE_BYTES),
-        ("DISK2.img", FLOPPY_SIZE_BYTES),
-    ])
+    fset = _make_set(
+        tmp_path,
+        "DOS",
+        ro=False,
+        disks=[
+            ("DISK1.img", FLOPPY_SIZE_BYTES),
+            ("DISK2.img", FLOPPY_SIZE_BYTES),
+        ],
+    )
     await ctrl.mount(fset, fset.disks[0])
     await ctrl.mount(fset, fset.disks[1])
     assert backend.lun_file == fset.disks[1]

@@ -1,4 +1,5 @@
 """Integration smoke test for __main__.run() with mocked gadget backend."""
+
 import json
 from pathlib import Path
 
@@ -33,9 +34,13 @@ async def test_runtime_restores_last_mounted(tmp_path: Path) -> None:
     set_dir.mkdir(parents=True)
     (set_dir / "DISK1.img").write_bytes(b"\x00" * 1474560)
     cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps({
-        "last_mounted": {"set": "DOS", "disk": "DISK1.img"},
-    }))
+    cfg.write_text(
+        json.dumps(
+            {
+                "last_mounted": {"set": "DOS", "disk": "DISK1.img"},
+            }
+        )
+    )
     runtime = await build_runtime(
         config_path=cfg,
         floppy_root=floppies,
@@ -54,9 +59,13 @@ async def test_runtime_skips_missing_last_mounted(tmp_path: Path) -> None:
     floppies = tmp_path / "floppies"
     floppies.mkdir()
     cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps({
-        "last_mounted": {"set": "Gone", "disk": "x.img"},
-    }))
+    cfg.write_text(
+        json.dumps(
+            {
+                "last_mounted": {"set": "Gone", "disk": "x.img"},
+            }
+        )
+    )
     runtime = await build_runtime(
         config_path=cfg,
         floppy_root=floppies,

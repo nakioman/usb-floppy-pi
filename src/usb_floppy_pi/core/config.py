@@ -1,4 +1,5 @@
 """Application configuration: JSON-backed, atomic writes."""
+
 from __future__ import annotations
 
 import json

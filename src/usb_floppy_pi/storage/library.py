@@ -1,4 +1,5 @@
 """Library facade: scan + watch + normalize. Holds the current FloppySet list."""
+
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,5 @@
 """Filesystem scanner: builds FloppySet list from /home/pi/floppies/."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,10 +26,12 @@ def scan(root: Path) -> list[FloppySet]:
         if not disks:
             continue
         read_only = (child / "ro").exists()
-        sets.append(FloppySet(
-            name=child.name,
-            path=child,
-            disks=disks,
-            read_only=read_only,
-        ))
+        sets.append(
+            FloppySet(
+                name=child.name,
+                path=child,
+                disks=disks,
+                read_only=read_only,
+            )
+        )
     return sets

@@ -1,4 +1,5 @@
 """Tests for core.config."""
+
 import json
 from pathlib import Path
 
@@ -16,13 +17,17 @@ def test_load_returns_defaults_when_file_missing(tmp_path: Path) -> None:
 
 def test_load_reads_existing_file(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.json"
-    cfg_path.write_text(json.dumps({
-        "mute": True,
-        "buzzer_volume": 0.3,
-        "last_mounted": {"set": "DOS 6.22", "disk": "DISK001.img"},
-        "samba_share_name": "myshare",
-        "log_level": "DEBUG",
-    }))
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "mute": True,
+                "buzzer_volume": 0.3,
+                "last_mounted": {"set": "DOS 6.22", "disk": "DISK001.img"},
+                "samba_share_name": "myshare",
+                "log_level": "DEBUG",
+            }
+        )
+    )
     cfg = load_config(cfg_path)
     assert cfg.mute is True
     assert cfg.buzzer_volume == 0.3

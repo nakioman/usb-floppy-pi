@@ -1,4 +1,5 @@
 """Tests for storage.watcher."""
+
 import asyncio
 from pathlib import Path
 

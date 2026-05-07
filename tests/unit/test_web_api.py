@@ -1,4 +1,5 @@
 """Tests for web.api — uses FastAPI TestClient + mock controller."""
+
 import asyncio
 import io
 import zipfile
@@ -15,8 +16,12 @@ from usb_floppy_pi.web.api import build_app
 
 def _params() -> GadgetParams:
     return GadgetParams(
-        id_vendor=0x0644, id_product=0x0000, bcd_device=0x3000,
-        manufacturer="TEAC", product="USB Floppy", serial="0001",
+        id_vendor=0x0644,
+        id_product=0x0000,
+        bcd_device=0x3000,
+        manufacturer="TEAC",
+        product="USB Floppy",
+        serial="0001",
         inquiry_string="TEAC    FD-05PUW         3000",
     )
 

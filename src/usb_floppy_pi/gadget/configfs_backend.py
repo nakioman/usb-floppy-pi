@@ -2,6 +2,7 @@
 
 Cannot be unit-tested. Verified via end-to-end manual testing on the Pi (Task 22).
 """
+
 from __future__ import annotations
 
 import logging

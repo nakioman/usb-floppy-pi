@@ -1,4 +1,5 @@
 """Entry point: load config, init storage + gadget, restore last mount, run web server."""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,8 +41,8 @@ class Runtime:
 def _build_gadget_params() -> GadgetParams:
     serial = _derive_serial()
     return GadgetParams(
-        id_vendor=0x0644,         # TEAC
-        id_product=0x0000,        # FD-05PUW
+        id_vendor=0x0644,  # TEAC
+        id_product=0x0000,  # FD-05PUW
         bcd_device=0x3000,
         manufacturer="TEAC",
         product="USB Floppy",
@@ -122,8 +123,8 @@ async def build_runtime(
         await original_eject()
         _persist_last_mounted()
 
-    controller.mount = _mount       # type: ignore[method-assign]
-    controller.eject = _eject       # type: ignore[method-assign]
+    controller.mount = _mount  # type: ignore[method-assign]
+    controller.eject = _eject  # type: ignore[method-assign]
 
     app = build_app(library=library, controller=controller, floppy_root=floppy_root)
 

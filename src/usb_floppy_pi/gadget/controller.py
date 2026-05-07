@@ -1,4 +1,5 @@
 """High-level USB gadget operations: mount, eject, swap, session-mount."""
+
 from __future__ import annotations
 
 import asyncio
@@ -66,9 +67,7 @@ class GadgetController:
 
         size = os.stat(disk).st_size
         if size > FLOPPY_SIZE_BYTES:
-            raise DiskTooLargeError(
-                f"{disk} is {size} bytes; max is {FLOPPY_SIZE_BYTES}"
-            )
+            raise DiskTooLargeError(f"{disk} is {size} bytes; max is {FLOPPY_SIZE_BYTES}")
         if size < FLOPPY_SIZE_BYTES:
             self._pad_to_full(disk)
 
@@ -94,8 +93,7 @@ class GadgetController:
             read_only=ro,
             is_session=session,
         )
-        logger.info("mounted %s/%s (ro=%s, session=%s)",
-                    floppy_set.name, disk.name, ro, session)
+        logger.info("mounted %s/%s (ro=%s, session=%s)", floppy_set.name, disk.name, ro, session)
         return self._current
 
     async def eject(self) -> None:
