@@ -1,5 +1,7 @@
 """Tests for web.api — uses FastAPI TestClient + mock controller."""
 import asyncio
+import io
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -117,3 +119,62 @@ def test_post_readonly_removes_ro_marker(app_with_data, tmp_path: Path) -> None:
         r = client.post("/api/sets/Quake/readonly", json={"ro": False})
         assert r.status_code == 200
         assert not (tmp_path / "Quake" / "ro").exists()
+
+
+def test_post_upload_img_passthrough(app_with_data, tmp_path: Path) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files={"file": ("UPLOAD.img", b"\x00" * 1474560, "application/octet-stream")},
+        )
+        assert r.status_code == 200
+        assert r.json()["kind"] == "passthrough"
+        assert (tmp_path / "DOS 6.22" / "UPLOAD.img").exists()
+
+
+def test_post_upload_ima_renamed(app_with_data, tmp_path: Path) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files={"file": ("UPLOAD.ima", b"\x00" * 1474560, "application/octet-stream")},
+        )
+        assert r.status_code == 200
+        assert r.json()["kind"] == "renamed"
+        assert r.json()["final_filename"] == "UPLOAD.img"
+        assert (tmp_path / "DOS 6.22" / "UPLOAD.img").exists()
+        assert not (tmp_path / "DOS 6.22" / "UPLOAD.ima").exists()
+
+
+def test_post_upload_imz_extracted(app_with_data, tmp_path: Path) -> None:
+    app, _, _, _ = app_with_data
+    inner_data = b"floppy" + b"\x00" * (1474560 - 6)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("inside.ima", inner_data)
+    buf.seek(0)
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files={"file": ("PACK.imz", buf.read(), "application/zip")},
+        )
+        assert r.status_code == 200
+        assert r.json()["kind"] == "extracted"
+        assert r.json()["final_filename"] == "PACK.img"
+        assert (tmp_path / "DOS 6.22" / "PACK.img").exists()
+        assert not (tmp_path / "DOS 6.22" / "PACK.imz").exists()
+
+
+def test_post_upload_corrupted_imz_returns_400(app_with_data, tmp_path: Path) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files={"file": ("BROKEN.imz", b"not a zip", "application/zip")},
+        )
+        assert r.status_code == 400
