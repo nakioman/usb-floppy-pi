@@ -1,0 +1,5 @@
+# === usb-floppy-pi additions ===
+dtoverlay=dwc2
+dtparam=i2c_arm=on
+dtparam=audio=off
+# === end usb-floppy-pi ===
