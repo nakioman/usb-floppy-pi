@@ -73,11 +73,17 @@ cp "$INSTALL_DIR/deploy/samba/smb.conf.j2" /etc/samba/smb.conf
 sed -i "s|{{ share_name }}|$SHARE_NAME|g" /etc/samba/smb.conf
 sed -i "s|{{ samba_user }}|$SAMBA_USER|g" /etc/samba/smb.conf
 
-# Create samba user if missing
+# Create samba user (and supporting group) if missing. Idempotent on reinstall:
+# a previous install may have left the group behind, in which case useradd
+# without -g would fail trying to create a group of the same name.
+if ! getent group "$SAMBA_USER" >/dev/null; then
+    groupadd --system "$SAMBA_USER"
+fi
+if ! id -u "$SAMBA_USER" >/dev/null 2>&1; then
+    useradd --no-create-home --shell /usr/sbin/nologin \
+        --gid "$SAMBA_USER" "$SAMBA_USER"
+fi
 if ! pdbedit -L | grep -q "^$SAMBA_USER:"; then
-    if ! id -u "$SAMBA_USER" >/dev/null 2>&1; then
-        useradd --no-create-home --shell /usr/sbin/nologin "$SAMBA_USER"
-    fi
     echo "==> Set Samba password for user '$SAMBA_USER':"
     smbpasswd -a "$SAMBA_USER"
 fi
