@@ -492,15 +492,15 @@ Estructura completa que crea `gadget.controller` en `/sys/kernel/config/usb_gadg
 
 | Parámetro | Valor | Notas |
 |-----------|-------|-------|
-| `idVendor` | `0x0644` | TEAC Corp (mimetiza un USB floppy real) |
-| `idProduct` | `0x0000` | TEAC FD-05PUW |
-| `bcdDevice` | `0x3000` | versión del firmware (cosmético) |
+| `idVendor` | `0x0525` | Linux Foundation (g_mass_storage default) |
+| `idProduct` | `0xA4A5` | Mass Storage Gadget |
+| `bcdDevice` | `0x0001` | versión del firmware (cosmético) |
 | `bcdUSB` | `0x0200` | USB 2.0 |
-| `strings/0x409/manufacturer` | `"TEAC"` | EN-US |
+| `strings/0x409/manufacturer` | `"Linux Foundation"` | EN-US |
 | `strings/0x409/product` | `"USB Floppy"` | |
 | `strings/0x409/serialnumber` | derivado del MAC del Pi | único por unidad |
 
-> **Nota sobre VID/PID:** estamos usando los identificadores reales de TEAC. Esto es una práctica común en proyectos de emulación retro (los Gotek lo hacen igual) y maximiza la compatibilidad con BIOSes que tienen listas blancas. No publicamos ni distribuimos comercialmente, así que el riesgo legal es nulo. Configurable en `config.json` por si alguien quiere usar valores propios.
+> **Nota sobre VID/PID — historia y trade-off:** Originalmente intentamos spoofear `0x0644:0x0000` (TEAC FD-05PUW) pensando que ayudaría a la BIOS retro a reconocernos como `A:` por legacy emulation. **No funcionó:** Windows moderno rechaza el PID `0x0000` (es técnicamente "reservado" en la spec USB) con Device Manager Code 10. Pasamos a los IDs estándar de Linux Foundation que es lo que usa el `g_mass_storage` legacy y proyectos similares como Pi-Floppy. El INQUIRY string SCSI (ver §LUN abajo) sigue diciendo `TEAC FD-05PUW` — eso es lo que la BIOS de la H55 mira para identificarnos como USB-FDD, no el USB descriptor.
 
 #### Configuración 1 (única)
 

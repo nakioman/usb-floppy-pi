@@ -39,12 +39,23 @@ class Runtime:
 
 
 def _build_gadget_params() -> GadgetParams:
+    """Descriptors for the USB gadget.
+
+    USB device descriptor uses the Linux Foundation Mass Storage IDs, which
+    Windows handles cleanly. We attempted to spoof TEAC FD-05PUW (0x0644:0x0000)
+    but PID 0x0000 is reserved/test in the USB spec and triggers Code 10 in
+    Windows' default Mass Storage driver.
+
+    The SCSI INQUIRY response keeps the TEAC FD-05PUW string — that's what
+    retro BIOSes inspect for USB-FDD legacy emulation, so the BIOS-A: trick
+    still works while modern Windows sees a clean Linux Foundation device.
+    """
     serial = _derive_serial()
     return GadgetParams(
-        id_vendor=0x0644,  # TEAC
-        id_product=0x0000,  # FD-05PUW
-        bcd_device=0x3000,
-        manufacturer="TEAC",
+        id_vendor=0x0525,
+        id_product=0xA4A5,
+        bcd_device=0x0001,
+        manufacturer="Linux Foundation",
         product="USB Floppy",
         serial=serial,
         inquiry_string="TEAC    FD-05PUW         3000",
