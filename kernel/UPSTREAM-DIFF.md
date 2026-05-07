@@ -53,3 +53,11 @@ change vs upstream.)
   function "floppy") and g_floppy.ko (legacy gadget that requests it).
   modinfo of g_floppy declares depends=usb_f_floppy,libcomposite, so depmod
   will auto-load the function module on `modprobe g_floppy`.
+- 2026-05-07: Verified module loads cleanly via insmod (libcomposite first,
+  then usb_f_floppy, then g_floppy file=...). dmesg shows
+  "g_floppy gadget.0: USB Floppy Pi Gadget, version: 0.1.0" and
+  "dwc2 3f980000.usb: bound driver g_floppy". UDC state is "configured" — the
+  host enumerated the device. Native legacy sysfs at
+  /sys/class/udc/<udc>/device/gadget*/lun0/ exposes file (rw), ro (rw),
+  forced_eject, nofua. No inquiry_string at this path — Task 7+8 will add
+  one via our own sysfs class.
