@@ -99,14 +99,42 @@ def build_app(
         return {"mounted": None}
 
     @app.post("/api/sets/{set_name}/readonly")
-    def post_readonly(set_name: str, req: ReadOnlyRequest) -> dict:
+    async def post_readonly(set_name: str, req: ReadOnlyRequest) -> dict:
         s = _set_by_name(set_name)
         marker = s.path / "ro"
         if req.ro:
             marker.write_text("")
-        else:
-            if marker.exists():
-                marker.unlink()
+        elif marker.exists():
+            marker.unlink()
+
+        # If a non-session disk from this set is currently mounted, re-mount
+        # with the new ro flag so the host sees the change without waiting for
+        # the next manual mount. The kernel rejects changing ro while a file
+        # is attached, so the controller's mount() does eject + delay + remount.
+        current = controller.current
+        if (
+            current is not None
+            and current.set_name == set_name
+            and not current.is_session
+        ):
+            updated_set = FloppySet(
+                name=s.name,
+                path=s.path,
+                disks=s.disks,
+                read_only=req.ro,
+            )
+            disk_path = next(
+                (d for d in s.disks if d.name == current.disk_filename), None
+            )
+            if disk_path is not None:
+                try:
+                    await controller.mount(updated_set, disk_path)
+                except Exception as exc:
+                    logger.exception("could not re-mount with new ro flag")
+                    raise HTTPException(
+                        status_code=500, detail=f"remount failed: {exc}"
+                    ) from exc
+
         return {"set": set_name, "read_only": req.ro}
 
     @app.post("/api/upload")
