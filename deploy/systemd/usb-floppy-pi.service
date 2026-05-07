@@ -10,6 +10,7 @@ WorkingDirectory=/opt/usb-floppy-pi
 Environment=USB_FLOPPY_CONFIG=/etc/usb-floppy-pi/config.json
 Environment=USB_FLOPPY_ROOT=/home/pi/floppies
 Environment=USB_FLOPPY_PORT=80
+ExecStartPre=/sbin/modprobe libcomposite
 ExecStartPre=/bin/sh -c 'mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config'
 ExecStart=/opt/usb-floppy-pi/.venv/bin/python -m usb_floppy_pi
 Restart=on-failure

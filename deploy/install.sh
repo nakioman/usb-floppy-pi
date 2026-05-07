@@ -95,10 +95,20 @@ fi
 
 if ! grep -q "modules-load=dwc2" "$BOOT_FW/cmdline.txt"; then
     # cmdline.txt is a single line; append in-place
-    sed -i 's|$| modules-load=dwc2|' "$BOOT_FW/cmdline.txt"
+    sed -i 's|$| modules-load=dwc2,libcomposite|' "$BOOT_FW/cmdline.txt"
     echo "    cmdline.txt patched"
+elif ! grep -q "libcomposite" "$BOOT_FW/cmdline.txt"; then
+    # already has dwc2, but missing libcomposite — add it inline
+    sed -i 's|modules-load=dwc2\b|modules-load=dwc2,libcomposite|' "$BOOT_FW/cmdline.txt"
+    echo "    cmdline.txt updated to include libcomposite"
 else
     echo "    cmdline.txt already patched"
+fi
+
+# Also ensure libcomposite is loaded via /etc/modules (fallback if cmdline fails)
+if ! grep -qx "libcomposite" /etc/modules 2>/dev/null; then
+    echo "libcomposite" >> /etc/modules
+    echo "    libcomposite added to /etc/modules"
 fi
 
 # === systemd unit ===
