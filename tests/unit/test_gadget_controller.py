@@ -145,3 +145,21 @@ async def test_session_mount_uses_temp_copy(tmp_path: Path) -> None:
     # Eject removes the temp file
     await ctrl.eject()
     assert backend.lun_file is None
+
+
+@pytest.mark.asyncio
+async def test_mount_undersize_ro_pads_temp_not_source(tmp_path: Path) -> None:
+    backend = MockBackend()
+    ctrl = GadgetController(backend, _params(), session_dir=tmp_path / "sessions")
+    await ctrl.initialize()
+    # Read-only set with a 100KB image
+    fset = _make_set(tmp_path, "RO Small", ro=True, disks=[("DISK1.img", 100_000)])
+    original_size = fset.disks[0].stat().st_size
+    await ctrl.mount(fset, fset.disks[0])
+    # Source must NOT have been padded
+    assert fset.disks[0].stat().st_size == original_size
+    # The backing file passed to the gadget MUST be 1.44MB
+    assert backend.lun_file is not None
+    assert backend.lun_file != fset.disks[0]
+    assert backend.lun_file.stat().st_size == FLOPPY_SIZE_BYTES
+    assert backend.lun_ro is True

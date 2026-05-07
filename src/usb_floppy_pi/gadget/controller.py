@@ -68,15 +68,28 @@ class GadgetController:
         size = os.stat(disk).st_size
         if size > FLOPPY_SIZE_BYTES:
             raise DiskTooLargeError(f"{disk} is {size} bytes; max is {FLOPPY_SIZE_BYTES}")
-        if size < FLOPPY_SIZE_BYTES:
-            self._pad_to_full(disk)
 
         backing = disk
+        needs_pad_to_temp = size < FLOPPY_SIZE_BYTES and floppy_set.read_only and not session
+
         if session:
+            # session mode: temp copy of source, pad if needed
             self._cleanup_session()
             self._session_dir.mkdir(parents=True, exist_ok=True)
             backing = self._session_dir / "session.img"
             shutil.copyfile(disk, backing)
+            if size < FLOPPY_SIZE_BYTES:
+                self._pad_to_full(backing)
+        elif needs_pad_to_temp:
+            # RO + undersize: pad in sidecar, don't touch source
+            self._cleanup_session()
+            self._session_dir.mkdir(parents=True, exist_ok=True)
+            backing = self._session_dir / "ro-padded.img"
+            shutil.copyfile(disk, backing)
+            self._pad_to_full(backing)
+        elif size < FLOPPY_SIZE_BYTES:
+            # RW + undersize: pad the source in place (same as before)
+            self._pad_to_full(disk)
 
         # If already mounted, do "eject + delay + remount" so the host sees a media change.
         if self._current is not None:
