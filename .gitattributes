@@ -1,0 +1,13 @@
+# Kernel module sources MUST use LF line endings — Linux build chain rejects CRLF.
+kernel/**/*.c text eol=lf
+kernel/**/*.h text eol=lf
+kernel/**/*.sh text eol=lf
+kernel/Makefile text eol=lf
+kernel/dkms.conf text eol=lf
+
+# Shell scripts in deploy/ also need LF.
+deploy/**/*.sh text eol=lf
+deploy/**/*.service text eol=lf
+deploy/**/*.conf text eol=lf
+deploy/**/*.append text eol=lf
+deploy/**/*.j2 text eol=lf
