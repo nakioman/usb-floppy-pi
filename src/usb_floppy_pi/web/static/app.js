@@ -144,19 +144,66 @@ async function setReadOnly(setName, ro) {
 
 async function doUpload() {
     const setSel = document.getElementById("upload-set");
+    const newSetInput = document.getElementById("upload-new-set");
     const fileInput = document.getElementById("upload-file");
     const errEl = document.getElementById("upload-error");
+    const resultsEl = document.getElementById("upload-results");
     errEl.textContent = "";
-    if (!fileInput.files.length) { errEl.textContent = "Pick a file first"; return; }
+    resultsEl.innerHTML = "";
+
+    if (!fileInput.files.length) {
+        errEl.textContent = "Pick at least one file first";
+        return;
+    }
+
+    const newSetName = newSetInput.value.trim();
+    const useNewSet = newSetName.length > 0;
+    const targetSet = useNewSet ? newSetName : setSel.value;
+    if (!targetSet) {
+        errEl.textContent = "Choose a set or type a new set name";
+        return;
+    }
+
+    // Show pending rows immediately for UX feedback during the upload.
+    const fileNames = Array.from(fileInput.files).map(f => f.name);
+    resultsEl.innerHTML = fileNames
+        .map(n => `<div class="pending" data-name="${escapeHtml(n)}">⏳ ${escapeHtml(n)} — uploading...</div>`)
+        .join("");
+
     const fd = new FormData();
-    fd.append("set", setSel.value);
-    fd.append("file", fileInput.files[0]);
+    fd.append("set", targetSet);
+    if (useNewSet) fd.append("create_new", "true");
+    for (const f of fileInput.files) fd.append("files", f);
+
+    let body;
     try {
-        await fetchJson("/api/upload", {method: "POST", body: fd});
-        fileInput.value = "";
-        await refresh();
+        body = await fetchJson("/api/upload", {method: "POST", body: fd});
     } catch (e) {
         errEl.textContent = "Upload failed: " + e.message;
+        resultsEl.innerHTML = "";
+        return;
+    }
+
+    // Replace the pending list with per-file outcomes.
+    resultsEl.innerHTML = body.results.map(r => {
+        const name = r.filename || "(unknown)";
+        if (r.kind === "error") {
+            return `<div class="err">✗ ${escapeHtml(name)} — ${escapeHtml(r.detail || "error")}</div>`;
+        }
+        const final = r.final_filename && r.final_filename !== name
+            ? ` → ${escapeHtml(r.final_filename)}`
+            : "";
+        return `<div class="ok">✓ ${escapeHtml(name)}${final} (${r.kind})</div>`;
+    }).join("");
+
+    // Clear inputs and refresh the set list so the new images show up.
+    fileInput.value = "";
+    newSetInput.value = "";
+    await refresh();
+    // Pre-select the just-used set in the dropdown for follow-up uploads.
+    const sel = document.getElementById("upload-set");
+    if (Array.from(sel.options).some(o => o.value === body.set)) {
+        sel.value = body.set;
     }
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
@@ -21,6 +22,8 @@ from ..storage.normalizer import normalize_arrived_file
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB — generous for .imz of a 1.44MB floppy
+MAX_SET_NAME_LEN = 64
+SAFE_SET_NAME_RE = re.compile(r"^[A-Za-z0-9 ._\-()]+$")
 
 
 class MountRequest(BaseModel):
@@ -112,62 +115,123 @@ def build_app(
         # the next manual mount. The kernel rejects changing ro while a file
         # is attached, so the controller's mount() does eject + delay + remount.
         current = controller.current
-        if (
-            current is not None
-            and current.set_name == set_name
-            and not current.is_session
-        ):
+        if current is not None and current.set_name == set_name and not current.is_session:
             updated_set = FloppySet(
                 name=s.name,
                 path=s.path,
                 disks=s.disks,
                 read_only=req.ro,
             )
-            disk_path = next(
-                (d for d in s.disks if d.name == current.disk_filename), None
-            )
+            disk_path = next((d for d in s.disks if d.name == current.disk_filename), None)
             if disk_path is not None:
                 try:
                     await controller.mount(updated_set, disk_path)
                 except Exception as exc:
                     logger.exception("could not re-mount with new ro flag")
-                    raise HTTPException(
-                        status_code=500, detail=f"remount failed: {exc}"
-                    ) from exc
+                    raise HTTPException(status_code=500, detail=f"remount failed: {exc}") from exc
 
         return {"set": set_name, "read_only": req.ro}
+
+    def _resolve_target_set(set_name: str, allow_create: bool) -> Path:
+        """Look up an existing set by name, or create a new folder if allowed.
+
+        Validates the set name to prevent path traversal and shell-unfriendly
+        characters. Returns the absolute path of the set folder.
+        """
+        name = set_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="set name is empty")
+        if len(name) > MAX_SET_NAME_LEN:
+            raise HTTPException(
+                status_code=400,
+                detail=f"set name too long (max {MAX_SET_NAME_LEN} chars)",
+            )
+        if not SAFE_SET_NAME_RE.fullmatch(name):
+            raise HTTPException(
+                status_code=400,
+                detail="set name may contain letters, digits, spaces, dots, "
+                "underscores, hyphens, and parentheses only",
+            )
+        if name.startswith(".") or name in {"_trash"}:
+            raise HTTPException(status_code=400, detail=f"reserved name: {name}")
+
+        # If a set with this name already exists in the library, use that folder.
+        for s in library.sets:
+            if s.name == name:
+                return s.path
+
+        target = floppy_root / name
+        if target.exists() and target.is_dir():
+            return target
+        if not allow_create:
+            raise HTTPException(status_code=404, detail=f"set not found: {name}")
+
+        # Create a brand-new set folder.
+        target.mkdir(parents=True, exist_ok=False)
+        logger.info("created new set folder %s", target)
+        return target
+
+    async def _stream_upload_to_set(set_path: Path, file: UploadFile) -> dict:
+        """Stream one upload into `set_path`, then normalize. Returns per-file
+        result dict; never raises — always returns a status row for the UI."""
+        if file.filename is None:
+            return {"filename": None, "kind": "error", "detail": "missing filename"}
+        # Strip any path components the client tried to send.
+        bare = Path(file.filename).name
+        if not bare:
+            return {"filename": file.filename, "kind": "error", "detail": "invalid filename"}
+        target = set_path / bare
+        total = 0
+        try:
+            async with await anyio.open_file(target, "wb") as out:
+                while True:
+                    chunk = await file.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_UPLOAD_BYTES:
+                        await out.aclose()
+                        target.unlink(missing_ok=True)
+                        return {
+                            "filename": bare,
+                            "kind": "error",
+                            "detail": f"exceeds max size ({MAX_UPLOAD_BYTES} bytes)",
+                        }
+                    await out.write(chunk)
+        except OSError as exc:
+            logger.exception("write failed for %s", target)
+            target.unlink(missing_ok=True)
+            return {"filename": bare, "kind": "error", "detail": f"write failed: {exc}"}
+
+        result = normalize_arrived_file(target)
+        return {
+            "filename": bare,
+            "final_filename": result.final_path.name,
+            "kind": result.kind,
+            "detail": result.detail or None,
+        }
 
     @app.post("/api/upload")
     async def post_upload(
         set: Annotated[str, Form()],
-        file: Annotated[UploadFile, File()],
+        files: Annotated[list[UploadFile], File()],
+        create_new: Annotated[bool, Form()] = False,
     ) -> dict:
-        s = _set_by_name(set)
-        if file.filename is None:
-            raise HTTPException(status_code=400, detail="missing filename")
+        """Upload one or more images to an existing or new set.
 
-        # Stream-with-cap so we never OOM
-        target = s.path / file.filename
-        total = 0
-        async with await anyio.open_file(target, "wb") as out:
-            while True:
-                chunk = await file.read(64 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
-                    await out.aclose()
-                    target.unlink(missing_ok=True)
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"upload exceeds max size ({MAX_UPLOAD_BYTES} bytes)",
-                    )
-                await out.write(chunk)
-
-        result = normalize_arrived_file(target)
-        if result.kind == "error":
-            raise HTTPException(status_code=400, detail=result.detail)
-        return {"final_filename": result.final_path.name, "kind": result.kind}
+        Form fields:
+          - `set`: the destination set name. May be an existing set or, if
+            `create_new=true`, a brand-new folder name to create.
+          - `files`: one or more image files (.img/.ima/.imz). Each is
+            normalized after upload.
+          - `create_new`: when true, create the folder if it does not exist.
+            When false (default), reject with 404 if the set is unknown.
+        """
+        if not files:
+            raise HTTPException(status_code=400, detail="no files provided")
+        target_dir = _resolve_target_set(set, allow_create=create_new)
+        results = [await _stream_upload_to_set(target_dir, f) for f in files]
+        return {"set": target_dir.name, "results": results}
 
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")

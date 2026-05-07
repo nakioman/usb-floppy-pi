@@ -132,10 +132,14 @@ def test_post_upload_img_passthrough(app_with_data, tmp_path: Path) -> None:
         r = client.post(
             "/api/upload",
             data={"set": "DOS 6.22"},
-            files={"file": ("UPLOAD.img", b"\x00" * 1474560, "application/octet-stream")},
+            files=[("files", ("UPLOAD.img", b"\x00" * 1474560, "application/octet-stream"))],
         )
         assert r.status_code == 200
-        assert r.json()["kind"] == "passthrough"
+        body = r.json()
+        assert body["set"] == "DOS 6.22"
+        assert len(body["results"]) == 1
+        assert body["results"][0]["kind"] == "passthrough"
+        assert body["results"][0]["final_filename"] == "UPLOAD.img"
         assert (tmp_path / "DOS 6.22" / "UPLOAD.img").exists()
 
 
@@ -145,11 +149,12 @@ def test_post_upload_ima_renamed(app_with_data, tmp_path: Path) -> None:
         r = client.post(
             "/api/upload",
             data={"set": "DOS 6.22"},
-            files={"file": ("UPLOAD.ima", b"\x00" * 1474560, "application/octet-stream")},
+            files=[("files", ("UPLOAD.ima", b"\x00" * 1474560, "application/octet-stream"))],
         )
         assert r.status_code == 200
-        assert r.json()["kind"] == "renamed"
-        assert r.json()["final_filename"] == "UPLOAD.img"
+        results = r.json()["results"]
+        assert results[0]["kind"] == "renamed"
+        assert results[0]["final_filename"] == "UPLOAD.img"
         assert (tmp_path / "DOS 6.22" / "UPLOAD.img").exists()
         assert not (tmp_path / "DOS 6.22" / "UPLOAD.ima").exists()
 
@@ -165,35 +170,144 @@ def test_post_upload_imz_extracted(app_with_data, tmp_path: Path) -> None:
         r = client.post(
             "/api/upload",
             data={"set": "DOS 6.22"},
-            files={"file": ("PACK.imz", buf.read(), "application/zip")},
+            files=[("files", ("PACK.imz", buf.read(), "application/zip"))],
         )
         assert r.status_code == 200
-        assert r.json()["kind"] == "extracted"
-        assert r.json()["final_filename"] == "PACK.img"
+        results = r.json()["results"]
+        assert results[0]["kind"] == "extracted"
+        assert results[0]["final_filename"] == "PACK.img"
         assert (tmp_path / "DOS 6.22" / "PACK.img").exists()
         assert not (tmp_path / "DOS 6.22" / "PACK.imz").exists()
 
 
-def test_post_upload_corrupted_imz_returns_400(app_with_data, tmp_path: Path) -> None:
+def test_post_upload_corrupted_imz_returns_per_file_error(app_with_data, tmp_path: Path) -> None:
     app, _, _, _ = app_with_data
     with TestClient(app) as client:
         r = client.post(
             "/api/upload",
             data={"set": "DOS 6.22"},
-            files={"file": ("BROKEN.imz", b"not a zip", "application/zip")},
+            files=[("files", ("BROKEN.imz", b"not a zip", "application/zip"))],
         )
-        assert r.status_code == 400
+        # 200 with per-file error in results — partial-success semantics
+        assert r.status_code == 200
+        results = r.json()["results"]
+        assert results[0]["kind"] == "error"
+        assert "imz" in results[0]["detail"].lower()
 
 
-def test_post_upload_oversize_returns_413(app_with_data, tmp_path: Path) -> None:
+def test_post_upload_oversize_returns_per_file_error(app_with_data, tmp_path: Path) -> None:
     app, _, _, _ = app_with_data
     with TestClient(app) as client:
         # 3 MB .img upload (over the 2MB cap)
         r = client.post(
             "/api/upload",
             data={"set": "DOS 6.22"},
-            files={"file": ("HUGE.img", b"\x00" * (3 * 1024 * 1024), "application/octet-stream")},
+            files=[
+                ("files", ("HUGE.img", b"\x00" * (3 * 1024 * 1024), "application/octet-stream"))
+            ],
         )
-        assert r.status_code == 413
+        assert r.status_code == 200
+        results = r.json()["results"]
+        assert results[0]["kind"] == "error"
+        assert "max size" in results[0]["detail"]
         # The partial file must not survive
         assert not (tmp_path / "DOS 6.22" / "HUGE.img").exists()
+
+
+def test_post_upload_multiple_files(app_with_data, tmp_path: Path) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files=[
+                ("files", ("DISK01.img", b"\x00" * 1474560, "application/octet-stream")),
+                ("files", ("DISK02.img", b"\x00" * 1474560, "application/octet-stream")),
+                ("files", ("DISK03.ima", b"\x00" * 1474560, "application/octet-stream")),
+            ],
+        )
+        assert r.status_code == 200
+        results = r.json()["results"]
+        assert len(results) == 3
+        assert {res["final_filename"] for res in results} == {
+            "DISK01.img",
+            "DISK02.img",
+            "DISK03.img",
+        }
+        for name in ("DISK01.img", "DISK02.img", "DISK03.img"):
+            assert (tmp_path / "DOS 6.22" / name).exists()
+
+
+def test_post_upload_partial_success(app_with_data, tmp_path: Path) -> None:
+    """One good file, one corrupted .imz — overall 200 with mixed results."""
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files=[
+                ("files", ("GOOD.img", b"\x00" * 1474560, "application/octet-stream")),
+                ("files", ("BAD.imz", b"not a zip", "application/zip")),
+            ],
+        )
+        assert r.status_code == 200
+        results = r.json()["results"]
+        kinds = [res["kind"] for res in results]
+        assert "passthrough" in kinds
+        assert "error" in kinds
+
+
+def test_post_upload_create_new_set(app_with_data, tmp_path: Path) -> None:
+    app, library, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "Brand New", "create_new": "true"},
+            files=[("files", ("FIRST.img", b"\x00" * 1474560, "application/octet-stream"))],
+        )
+        assert r.status_code == 200
+        assert r.json()["set"] == "Brand New"
+        assert (tmp_path / "Brand New" / "FIRST.img").exists()
+
+
+def test_post_upload_create_new_required_when_set_missing(app_with_data, tmp_path: Path) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        # Without create_new=true, an unknown set returns 404
+        r = client.post(
+            "/api/upload",
+            data={"set": "Does Not Exist"},
+            files=[("files", ("X.img", b"\x00" * 1474560, "application/octet-stream"))],
+        )
+        assert r.status_code == 404
+
+
+def test_post_upload_rejects_invalid_set_names(app_with_data) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        # Each of these should be rejected with a 4xx (400 from our validator,
+        # or 422 from FastAPI's Form validator for the empty string).
+        for bad in ["../escape", "with/slash", "back\\slash", ".hidden", "_trash", ""]:
+            r = client.post(
+                "/api/upload",
+                data={"set": bad, "create_new": "true"},
+                files=[("files", ("X.img", b"\x00" * 1474560, "application/octet-stream"))],
+            )
+            assert 400 <= r.status_code < 500, (
+                f"set={bad!r} should be rejected, got {r.status_code}"
+            )
+
+
+def test_post_upload_strips_path_components_from_filename(app_with_data, tmp_path: Path) -> None:
+    """A client-supplied filename like 'a/b/EVIL.img' must land as 'EVIL.img'
+    inside the chosen set, not escape the set folder."""
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/upload",
+            data={"set": "DOS 6.22"},
+            files=[("files", ("../../EVIL.img", b"\x00" * 1474560, "application/octet-stream"))],
+        )
+        assert r.status_code == 200
+        assert (tmp_path / "DOS 6.22" / "EVIL.img").exists()
+        assert not (tmp_path / "EVIL.img").exists()

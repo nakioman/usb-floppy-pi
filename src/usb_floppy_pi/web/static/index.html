@@ -52,7 +52,7 @@
             border-radius: 6px;
             margin-top: 1rem;
         }
-        select, input[type=file] {
+        select, input[type=file], input[type=text] {
             background: #1a1a1a;
             color: #e0e0e0;
             border: 1px solid #444;
@@ -60,6 +60,12 @@
             border-radius: 4px;
         }
         .error { color: #e53935; margin-top: 0.5rem; }
+        .upload-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0; }
+        .upload-row label { min-width: 100px; font-size: 0.9rem; }
+        .upload-results { margin-top: 0.75rem; font-family: monospace; font-size: 0.85rem; }
+        .upload-results .ok { color: #4caf50; }
+        .upload-results .err { color: #e53935; }
+        .upload-results .pending { color: #aaa; }
     </style>
 </head>
 <body>
@@ -68,11 +74,20 @@
     <div id="sets-container"></div>
 
     <div class="upload-form">
-        <h3 style="margin-top: 0">Upload image</h3>
-        <select id="upload-set"></select>
-        <input type="file" id="upload-file" accept=".img,.ima,.imz">
-        <button id="upload-button">Upload</button>
+        <h3 style="margin-top: 0">Upload images</h3>
+        <div class="upload-row">
+            <label for="upload-set">Set:</label>
+            <select id="upload-set"></select>
+            <span>or</span>
+            <input type="text" id="upload-new-set" placeholder="new set name" maxlength="64">
+        </div>
+        <div class="upload-row">
+            <label for="upload-file">Files:</label>
+            <input type="file" id="upload-file" accept=".img,.ima,.imz" multiple>
+            <button id="upload-button">Upload</button>
+        </div>
         <div id="upload-error" class="error"></div>
+        <div id="upload-results" class="upload-results"></div>
     </div>
 
     <script src="/static/app.js"></script>
