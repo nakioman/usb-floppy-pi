@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -76,7 +77,7 @@ def build_app(
         try:
             mounted = await controller.mount(s, d, session=req.session)
         except DiskTooLargeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"mounted": asdict(mounted) | {"backing_path": str(mounted.backing_path)}}
 
     @app.post("/api/eject")
@@ -97,8 +98,8 @@ def build_app(
 
     @app.post("/api/upload")
     async def post_upload(
-        set: str = Form(...),
-        file: UploadFile = File(...),
+        set: Annotated[str, Form()],
+        file: Annotated[UploadFile, File()],
     ) -> dict:
         s = _set_by_name(set)
         if file.filename is None:
