@@ -1,7 +1,12 @@
 [Unit]
 Description=USB Floppy Pi
-After=network-online.target smbd.service systemd-modules-load.service
-Wants=network-online.target
+# We only depend on kernel modules being loaded so the gadget can be created.
+# Network is needed for the web UI but uvicorn binds 0.0.0.0:80 happily even
+# before WiFi associates — connections will start succeeding as soon as DHCP
+# completes, no need to BLOCK boot on it.
+# Samba (smbd) is independent — its slowness shouldn't delay the gadget.
+After=systemd-modules-load.service local-fs.target
+DefaultDependencies=yes
 
 [Service]
 Type=simple
