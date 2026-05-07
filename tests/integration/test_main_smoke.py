@@ -1,5 +1,4 @@
 """Integration smoke test for __main__.run() with mocked gadget backend."""
-import asyncio
 import json
 from pathlib import Path
 
