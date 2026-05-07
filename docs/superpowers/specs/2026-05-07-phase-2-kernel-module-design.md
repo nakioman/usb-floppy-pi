@@ -11,11 +11,16 @@
 
 Phase 1 cumplió en lo básico: USB Mass Storage gadget, web UI, Samba, mount/eject. Pero quedaron tres limitaciones que solo se pueden resolver tocando el kernel:
 
-1. **No es identificado como floppy "siempre"** — el módulo standard `f_mass_storage` usa SubClass=06 (SCSI). Cuando no hay media cargada, Windows demota al device a "USB drive genérico". Un floppy real (TEAC FD-05PUW) usa SubClass=04 (UFI), que hace que el OS lo trate como floppy independiente del media. El kernel hardcodea SubClass=06; no es configurable via configfs/sysfs.
+1. ~~**No es identificado como floppy "siempre"**~~ — **CORRECCIÓN durante implementación de Phase 2 (2026-05-07):** este motivador resultó ser falso. Probamos el módulo Phase 2 con SCSI subclass y `removable=1` contra Windows 11 y la máquina **mantuvo la identidad "Floppy Disk Drive (A:)" tanto con media montada como con media ejectada** ("Please insert a disk in drive A:"). Eso significa que Phase 1 con SCSI subclass **ya entregaba** el comportamiento que pensábamos que nos faltaba — Windows usa varios heurísticos (capacidad reportada por READ_CAPACITY, removable bit, INQUIRY string) y eso le alcanza para clasificar como floppy independiente del media. El "device se demota a USB drive genérico" que observé durante Phase 1 fue probablemente causado por algún otro factor (driver cacheado, VID/PID viejo, etc.), no por la falta de UFI subclass. **Ver §2.3 para el detalle del experimento UFI fallido.**
 
 2. **No hay control de velocidad de transferencia** — la transferencia corre a velocidad nativa USB 2.0 (~5 MB/s). No "se siente" como un floppy real (que era ~50 KB/s read). DOS y Win98 funcionan pero la experiencia retro pierde fidelidad.
 
-3. **El sonido del floppy desde userspace es inviable con buena fidelidad** — para emitir clacks sincronizados con seeks reales de track, necesitamos LBA por request. `f_mass_storage` no expone eso. Un canal de eventos kernel→userspace agrega latencia, IPC y un proceso extra. Si tenemos que tocar el kernel igual para puntos 1 y 2, mejor poner el buzzer adentro.
+3. **El sonido del floppy desde userspace es inviable con buena fidelidad** — para emitir clacks sincronizados con seeks reales de track, necesitamos LBA por request. `f_mass_storage` no expone eso. Un canal de eventos kernel→userspace agrega latencia, IPC y un proceso extra. Si tenemos que tocar el kernel igual para puntos 2 y 3, conviene tener un módulo propio donde después meter el buzzer adentro.
+
+**Phase 2 sigue valiendo la pena** porque (2) y (3) son razones válidas y necesitan kernel work — pero el "win" principal que esperábamos de §2.3 (UFI = floppy siempre) resultó estar ya disponible en Phase 1. Phase 2 entrega:
+- Cimiento de kernel module propio (necesario para throttle y buzzer)
+- Sysfs class limpio para que la web UI hable directo (en vez de configfs)
+- Code path donde después meter speed throttling y buzzer state machine
 
 **Phase 2 entrega:** un módulo de kernel `g_floppy.ko` (forkeado de `f_mass_storage` + `g_mass_storage` + `storage_common`) que:
 - Declara SubClass=UFI → host trata como floppy real
@@ -44,13 +49,56 @@ Phase 2 abandona configfs/libcomposite. El módulo es single-purpose (un único 
 - DKMS-friendly (un solo `.ko`, sin scripts auxiliares de configfs)
 - Coincide con Pi-Floppy y otros proyectos del ecosistema
 
-### 2.3 UFI subclass
+### 2.3 UFI subclass — DEFERRED (descubierto durante implementación)
 
-`bInterfaceSubClass = USB_SC_UFI` (0x04). El protocol queda `USB_PR_BULK` (0x50, BBB) — UFI usa CBI tradicionalmente pero todos los OS modernos aceptan UFI sobre BBB sin problemas.
+**Estado actual:** SCSI subclass (0x06) es el default que funciona. UFI (0x04) es opt-in experimental que Windows rechaza con el módulo actual.
 
-**Beneficio confirmado:** Windows trata al device como floppy drive en Device Manager incluso sin media. Drive letter A: persiste sin cambiar. Para BIOSes retro como la H55, mejora la chance de ser asignado como USB-FDD legacy.
+**Lo que descubrimos validando contra Windows 11 (2026-05-07):**
 
-**Module param de fallback** `subclass=ufi|scsi` por si algún BIOS exótico no le gusta UFI; default = ufi.
+| Escenario al primer enumerate | SCSI subclass | UFI subclass |
+|-------------------------------|---------------|--------------|
+| Module load con `file=path` (media presente) | **Floppy Disk Drive (A:)** ✓ | Disconnect |
+| Module load **sin** media | **USB Drive** (genérico) ✗ | Disconnect |
+
+Después de la primera enumeración exitosa, **eject vía sysfs mantiene la clasificación Floppy** (Windows muestra "insert a disk in drive A:"). Si en cambio Windows enumeró sin media → quedó como USB Drive y aunque después montes algo, sigue siendo USB Drive.
+
+**Por qué UFI no funciona "drop-in":** cambiar solo `bInterfaceSubClass` a UFI no es suficiente. Windows con UFI carga su driver `flpydisk.sys` que requiere un command set específico (READ_FORMAT_CAPACITIES con response format UFI, MODE SENSE de páginas Flexible-Disk-Geometry, START_STOP_UNIT con flags floppy, etc.). El upstream `f_mass_storage` solo implementa SCSI Reduced Block Commands + Direct Access — no responde correctamente a esos comandos UFI. Resultado: Windows enumera el device, falla el driver init, lo desconecta inmediatamente.
+
+**Implicación para Phase 2:**
+- `bInterfaceSubClass = USB_SC_SCSI` queda como default
+- `subclass=ufi` queda como módulo param experimental, documentado que actualmente no funciona
+- Para hacer UFI **real** se necesita implementar el command set UFI en `f_floppy.c` (~300-500 LOC nuevas) — agregado a "Out of scope" de Phase 2, candidato Phase 4
+
+El protocol queda `USB_PR_BULK` (0x50, BBB).
+
+### 2.4 Garantía de "primera enumeración con media" — `current.img` siempre apunta a algo
+
+Como SCSI requiere que el primer enumerate tenga media (sino → USB Drive), Phase 2 deployment garantiza esto con un patrón de symlinks:
+
+**Filesystem:**
+- `/var/lib/usb-floppy-pi/blank.img` — FAT12 vacío de 1.44 MB. **Siempre existe**, creado por `install.sh`. Nunca se borra. Volume label "BLANK" o similar.
+- `/var/lib/usb-floppy-pi/current.img` — **symlink** que apunta a:
+  - `blank.img` cuando no hay nada montado (post-install, después de un eject explícito, después de borrar `last_mounted` del config)
+  - El `.img` real cuando el usuario montó algo
+
+**Module config** (`/etc/modprobe.d/usb-floppy-pi.conf`):
+```
+options g_floppy file=/var/lib/usb-floppy-pi/current.img stall=0 removable=1 ...
+```
+
+Como `current.img` siempre resuelve a un FAT12 1.44 MB válido, Windows siempre clasifica al device como **Floppy Disk Drive (A:)** en el primer enumerate.
+
+**UX resultante:**
+- Primer boot sin nada subido → Windows ve `Floppy Disk Drive (A:)` con disquete vacío "BLANK"
+- Usuario sube + monta `.img` → Python actualiza el symlink + escribe a `lun0_file` → Windows ve el contenido real (la unidad sigue siendo A: floppy)
+- Usuario eject → Python actualiza symlink a `blank.img` + escribe a `lun0_file` → Windows ve drive A: vacío
+- Reboot → módulo carga con file pointing al symlink current → resuelve al último target → continúa donde quedó
+
+**Diferencia con el approach "blank.img permanente"** que rechazamos antes:
+- Aquel: blank.img permanece atachado, eject = swap a blank, drive nunca dice "insert disk"
+- Este: blank.img solo aparece cuando no hay nada real, drive puede mostrar "blank/empty" pero el modelo mental es claro
+
+Si el usuario prefiere que después de eject Windows muestre "insert a disk" en vez de "BLANK empty floppy", se puede flipear con un setting `eject_uses_blank=false` y caer al patrón "actual eject" (a costa de no funcionar en boot fresh sin media). Decisión configurable post-implementación.
 
 ### 2.4 Speed throttling
 

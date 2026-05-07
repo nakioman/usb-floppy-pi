@@ -211,10 +211,21 @@ static const char fsg_string_interface[] = "USB Floppy";
 
 /* === usb-floppy-pi additions: configurable interface subclass ===
  * The upstream f_mass_storage hardcodes bInterfaceSubClass = USB_SC_SCSI in
- * storage_common.c's fsg_intf_desc. We default to USB_SC_UFI (USB-FDD), which
- * makes Windows treat the device as a Floppy Disk Drive even when the LUN is
- * empty — matching the behavior of a real TEAC FD-05PUW. The 'subclass' module
- * param allows fallback to SCSI for hosts/BIOSes that reject UFI.
+ * storage_common.c's fsg_intf_desc. We expose a 'subclass' module param to
+ * select between SCSI (0x06, default) and UFI (0x04, experimental).
+ *
+ * IMPORTANT: UFI is currently NOT FUNCTIONAL with this module. Setting
+ * subclass=ufi makes Windows load its UFI-specific driver (flpydisk.sys),
+ * which sends commands like READ_FORMAT_CAPACITIES with UFI-specific
+ * response format, MODE SENSE Flexible-Disk-Geometry pages, and other
+ * UFI-only requests that f_mass_storage upstream does not implement.
+ * Result: Windows enumerates the device, fails the driver init, disconnects.
+ * SCSI mode works because Windows uses the generic Mass Storage driver which
+ * only requires the standard SCSI Reduced Block Commands + Direct Access set.
+ *
+ * Phase 4+ work: implement the UFI command set in f_floppy.c (~300-500 LOC)
+ * to make subclass=ufi actually work. This would unlock "device always seen
+ * as floppy regardless of media presence" in Windows.
  *
  * The descriptor's value is written in fsg_bind(), which runs before the host
  * reads the interface descriptor — see floppy_apply_subclass() below.
@@ -222,11 +233,11 @@ static const char fsg_string_interface[] = "USB Floppy";
 #include <linux/moduleparam.h>
 #include <linux/usb/ch9.h>
 
-static char *floppy_subclass = "ufi";
+static char *floppy_subclass = "scsi";
 module_param_named(subclass, floppy_subclass, charp, 0444);
 MODULE_PARM_DESC(subclass,
-	"USB interface subclass: ufi (0x04, default — host treats as floppy) "
-	"or scsi (0x06, fallback for BIOSes that reject UFI)");
+	"USB interface subclass: scsi (0x06, default — works on all hosts) "
+	"or ufi (0x04, EXPERIMENTAL — Windows currently rejects, see source comment)");
 
 static u8 floppy_resolve_subclass(void)
 {
@@ -234,9 +245,9 @@ static u8 floppy_resolve_subclass(void)
 		return USB_SC_UFI;
 	if (!strcmp(floppy_subclass, "scsi"))
 		return USB_SC_SCSI;
-	pr_warn("g_floppy: unknown subclass '%s'; falling back to ufi\n",
+	pr_warn("g_floppy: unknown subclass '%s'; falling back to scsi\n",
 		floppy_subclass);
-	return USB_SC_UFI;
+	return USB_SC_SCSI;
 }
 
 static void floppy_apply_subclass(void)
