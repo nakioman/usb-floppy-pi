@@ -235,7 +235,7 @@ async function refreshHwControls() {
         panel.style.display = "none";
         return;
     }
-    panel.style.display = "";
+    panel.style.display = "block";
 
     // Don't fight the user's current input — if a control was changed less
     // than 1.5s ago, skip the next refresh so we don't snap their slider back.
