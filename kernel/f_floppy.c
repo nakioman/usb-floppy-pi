@@ -208,6 +208,15 @@ static const char fsg_string_interface[] = "USB Floppy";
 
 #include "storage_common.h"
 #include "f_floppy.h"
+#include "floppy_throttle.h"
+
+/* usb-floppy-pi: throttle state owned by usb_f_floppy.ko, initialised at the
+ * first fsg_alloc_inst() call and torn down at the last fsg_free_inst().
+ * Lives in module BSS, not on a per-instance allocation, because we only
+ * ever want one (the gadget is single-purpose). */
+static struct floppy_throttle_state floppy_throttle;
+static int floppy_throttle_refcnt;
+static DEFINE_MUTEX(floppy_throttle_lock);
 
 /* === usb-floppy-pi additions: configurable interface subclass ===
  * The upstream f_mass_storage hardcodes bInterfaceSubClass = USB_SC_SCSI in
@@ -693,6 +702,14 @@ static int do_read(struct fsg_common *common)
 	}
 	file_offset = ((loff_t) lba) << curlun->blkbits;
 
+	/* usb-floppy-pi: rate-limit hook before starting the actual read.
+	 * Translates floppy-real timing semantics (50 KB/s, 6ms seek between
+	 * tracks) into usleep_range() calls within this kthread. The
+	 * "unthrottled" preset bypasses both delays. */
+	floppy_throttle_on_read(floppy_throttle_get(),
+		(u32)lba,
+		(u32)(common->data_size_from_cmnd >> curlun->blkbits));
+
 	/* Carry out the file reads */
 	amount_left = common->data_size_from_cmnd;
 	if (unlikely(amount_left == 0))
@@ -837,6 +854,13 @@ static int do_write(struct fsg_common *common)
 		curlun->sense_data = SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 		return -EINVAL;
 	}
+
+	/* usb-floppy-pi: rate-limit hook before the write loop starts.
+	 * write_kbps is typically lower than read_kbps to mimic the
+	 * verify-after-write penalty of real DOS floppy drivers. */
+	floppy_throttle_on_write(floppy_throttle_get(),
+		(u32)lba,
+		(u32)(common->data_size_from_cmnd >> curlun->blkbits));
 
 	/* Carry out the file writes */
 	get_some_more = 1;
@@ -3585,6 +3609,14 @@ static void fsg_free_inst(struct usb_function_instance *fi)
 	opts = fsg_opts_from_func_inst(fi);
 	fsg_common_release(opts->common);
 	kfree(opts);
+
+	/* usb-floppy-pi: tear down throttle when the last instance goes away. */
+	mutex_lock(&floppy_throttle_lock);
+	if (--floppy_throttle_refcnt <= 0) {
+		floppy_throttle_exit(&floppy_throttle);
+		floppy_throttle_refcnt = 0;
+	}
+	mutex_unlock(&floppy_throttle_lock);
 }
 
 static struct usb_function_instance *fsg_alloc_inst(void)
@@ -3603,6 +3635,12 @@ static struct usb_function_instance *fsg_alloc_inst(void)
 		rc = PTR_ERR(opts->common);
 		goto release_opts;
 	}
+
+	/* usb-floppy-pi: initialise throttle on first use. */
+	mutex_lock(&floppy_throttle_lock);
+	if (floppy_throttle_refcnt++ == 0)
+		floppy_throttle_init(&floppy_throttle);
+	mutex_unlock(&floppy_throttle_lock);
 
 	rc = fsg_common_set_num_buffers(opts->common,
 					CONFIG_USB_GADGET_STORAGE_NUM_BUFFERS);

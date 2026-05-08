@@ -80,3 +80,12 @@ change vs upstream.)
   fi_msg is set; unregistered in msg_unbind. Verified all three attrs
   read/write correctly: cat returns the current value, echo writes it.
   Empty write to lun0_file ejects the medium, non-empty mounts.
+- 2026-05-08: Added kernel/floppy_throttle.{c,h} implementing 3 named
+  presets (floppy-real default 50/30/6ms, floppy-fast 200/200/0.5ms,
+  unthrottled 0/0/0). State lives in usb_f_floppy.ko module BSS,
+  refcounted across fsg_alloc_inst/fsg_free_inst. Hooks added to
+  f_floppy.c do_read/do_write right after LBA validation, before the
+  read/write loop. Sectors-per-track set to 36 (18*2 for 1.44MB CHS)
+  to detect track changes. Verified module loads with
+  "throttle init, default preset=floppy-real" log message.
+  Sysfs interface for the preset comes in Task 10.
