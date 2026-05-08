@@ -215,8 +215,138 @@ async function doUpload() {
 
 document.getElementById("upload-button")?.addEventListener("click", doUpload);
 
-// Refresh every 3 seconds + on load
-refresh().catch(e => {
-    document.getElementById("status").textContent = "Error: " + e.message;
+// --- Phase 2 hardware controls ------------------------------------------
+
+let hwControlsState = { initialised: false, ignoreUntil: 0 };
+
+async function refreshHwControls() {
+    let state;
+    try { state = await fetchJson("/api/state"); }
+    catch (e) { return; }
+    const m = state.metrics || {};
+    const panel = document.getElementById("hw-controls");
+    if (!panel) return;
+
+    // Show panel as soon as we have any metrics back. Throttle (Phase 2.3)
+    // is always available with the kernel module loaded; volume/buzzer
+    // (Phase 2.4) appear when their sysfs attrs exist.
+    const hasThrottle = m.speed_preset !== undefined && m.speed_preset !== null;
+    if (!hasThrottle) {
+        panel.style.display = "none";
+        return;
+    }
+    panel.style.display = "";
+
+    // Don't fight the user's current input — if a control was changed less
+    // than 1.5s ago, skip the next refresh so we don't snap their slider back.
+    if (Date.now() < hwControlsState.ignoreUntil) return;
+
+    const speedSel = document.getElementById("speed-preset");
+    if (speedSel && speedSel.value !== m.speed_preset)
+        speedSel.value = m.speed_preset;
+    const badge = document.getElementById("speed-badge");
+    if (badge && typeof m.speed_read_kbps === "number")
+        badge.textContent = `${m.speed_read_kbps}/${m.speed_write_kbps} KB/s · ${m.seek_us}µs seek`;
+
+    const buzzerAvailable = m.buzzer !== null;
+    const volumeAvailable = m.volume !== null;
+    const muteAvailable = m.mute !== null;
+    const rowVolume = document.getElementById("row-volume");
+    const rowBuzzer = document.getElementById("row-buzzer");
+    const note = document.getElementById("buzzer-unavailable");
+    if (note) note.hidden = buzzerAvailable && volumeAvailable;
+    if (rowVolume) rowVolume.classList.toggle("unavailable", !volumeAvailable);
+    if (rowBuzzer) rowBuzzer.classList.toggle("unavailable", !(buzzerAvailable && muteAvailable));
+
+    if (volumeAvailable) {
+        const vol = document.getElementById("volume-slider");
+        if (vol) vol.value = m.volume;
+        const vb = document.getElementById("volume-badge");
+        if (vb) vb.textContent = m.volume;
+    }
+    if (buzzerAvailable) {
+        const b = document.getElementById("buzzer-toggle");
+        if (b) b.textContent = m.buzzer ? "Buzzer: on" : "Buzzer: off";
+    }
+    if (muteAvailable) {
+        const mu = document.getElementById("mute-toggle");
+        if (mu) mu.textContent = m.mute ? "Muted" : "Unmuted";
+    }
+}
+
+function bumpIgnore() { hwControlsState.ignoreUntil = Date.now() + 1500; }
+
+document.getElementById("speed-preset")?.addEventListener("change", async (e) => {
+    bumpIgnore();
+    const errEl = document.getElementById("hw-error");
+    errEl.textContent = "";
+    try {
+        await fetchJson("/api/speed", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({preset: e.target.value}),
+        });
+    } catch (err) {
+        errEl.textContent = "Speed change failed: " + err.message;
+    }
 });
-setInterval(refresh, 3000);
+
+document.getElementById("volume-slider")?.addEventListener("input", (e) => {
+    document.getElementById("volume-badge").textContent = e.target.value;
+});
+document.getElementById("volume-slider")?.addEventListener("change", async (e) => {
+    bumpIgnore();
+    const errEl = document.getElementById("hw-error");
+    errEl.textContent = "";
+    try {
+        await fetchJson("/api/volume", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({volume: parseInt(e.target.value, 10)}),
+        });
+    } catch (err) {
+        errEl.textContent = "Volume change failed: " + err.message;
+    }
+});
+
+document.getElementById("buzzer-toggle")?.addEventListener("click", async () => {
+    bumpIgnore();
+    const cur = document.getElementById("buzzer-toggle").textContent;
+    const enable = !cur.includes("on");
+    try {
+        await fetchJson("/api/buzzer", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({enabled: enable}),
+        });
+        await refreshHwControls();
+    } catch (err) {
+        document.getElementById("hw-error").textContent = "Buzzer toggle failed: " + err.message;
+    }
+});
+
+document.getElementById("mute-toggle")?.addEventListener("click", async () => {
+    bumpIgnore();
+    const cur = document.getElementById("mute-toggle").textContent;
+    const wantMute = !cur.includes("Muted");
+    try {
+        await fetchJson("/api/mute", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({mute: wantMute}),
+        });
+        await refreshHwControls();
+    } catch (err) {
+        document.getElementById("hw-error").textContent = "Mute toggle failed: " + err.message;
+    }
+});
+
+// Refresh every 3 seconds + on load
+async function tick() {
+    try { await refresh(); } catch (e) {
+        document.getElementById("status").textContent = "Error: " + e.message;
+    }
+    await refreshHwControls();
+}
+tick();
+setInterval(tick, 3000);

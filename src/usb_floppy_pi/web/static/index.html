@@ -66,12 +66,51 @@
         .upload-results .ok { color: #4caf50; }
         .upload-results .err { color: #e53935; }
         .upload-results .pending { color: #aaa; }
+        .hw-controls { display: none; }   /* shown by JS once /api/state metrics arrive */
+        .hw-controls .row { display: flex; gap: 0.5rem; align-items: center; margin: 0.4rem 0; }
+        .hw-controls label { min-width: 100px; font-size: 0.9rem; }
+        .hw-controls .badge {
+            font-family: monospace; font-size: 0.8rem; color: #888;
+            margin-left: 0.5rem;
+        }
+        .hw-controls input[type=range] { flex-grow: 1; max-width: 240px; }
+        .hw-controls .unavailable {
+            opacity: 0.4; pointer-events: none;
+        }
+        .hw-controls .unavailable-note {
+            font-size: 0.8rem; color: #888; margin-left: 0.5rem;
+        }
     </style>
 </head>
 <body>
     <h1>USB Floppy Pi</h1>
     <div id="status" class="status">Loading...</div>
     <div id="sets-container"></div>
+
+    <div class="upload-form hw-controls" id="hw-controls">
+        <h3 style="margin-top: 0">Hardware controls</h3>
+        <div class="row">
+            <label for="speed-preset">Speed:</label>
+            <select id="speed-preset">
+                <option value="floppy-real">Real floppy (~50 KB/s)</option>
+                <option value="floppy-fast">Fast (~200 KB/s)</option>
+                <option value="unthrottled">Unthrottled (USB native)</option>
+            </select>
+            <span class="badge" id="speed-badge"></span>
+        </div>
+        <div class="row" id="row-volume">
+            <label for="volume-slider">Volume:</label>
+            <input type="range" id="volume-slider" min="0" max="100" step="1" value="70">
+            <span class="badge" id="volume-badge">70</span>
+            <span class="unavailable-note" id="buzzer-unavailable" hidden>(buzzer not loaded)</span>
+        </div>
+        <div class="row" id="row-buzzer">
+            <label>Sound:</label>
+            <button id="buzzer-toggle" type="button">Buzzer: ?</button>
+            <button id="mute-toggle" type="button">Mute: ?</button>
+        </div>
+        <div id="hw-error" class="error"></div>
+    </div>
 
     <div class="upload-form">
         <h3 style="margin-top: 0">Upload images</h3>
