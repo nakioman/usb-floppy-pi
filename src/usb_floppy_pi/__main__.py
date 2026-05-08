@@ -16,6 +16,7 @@ from .core.config import Config, load_config, save_config
 from .gadget.backend import GadgetBackend, GadgetParams
 from .gadget.configfs_backend import ConfigFsBackend
 from .gadget.controller import GadgetController
+from .gadget.sysfs_backend import SysfsBackend
 from .storage.library import Library
 from .web.api import build_app
 
@@ -115,6 +116,26 @@ async def build_runtime(
     # Now expose the gadget to the host (with image already attached if there was one).
     await controller.activate()
 
+    # Phase 2: apply persisted runtime settings to the backend. These are
+    # default no-ops on the Phase 1 backends (ConfigFsBackend / MockBackend),
+    # so the same code path is safe regardless of which backend is active.
+    try:
+        gadget_backend.set_speed_preset(cfg.speed_preset)
+    except (ValueError, OSError) as exc:
+        logger.warning("could not apply speed_preset=%r: %s", cfg.speed_preset, exc)
+    try:
+        gadget_backend.set_volume(cfg.volume)
+    except (ValueError, OSError) as exc:
+        logger.warning("could not apply volume=%d: %s", cfg.volume, exc)
+    try:
+        gadget_backend.set_mute(cfg.mute)
+    except OSError as exc:
+        logger.warning("could not apply mute=%s: %s", cfg.mute, exc)
+    try:
+        gadget_backend.set_buzzer_enabled(cfg.buzzer_enabled)
+    except OSError as exc:
+        logger.warning("could not apply buzzer_enabled=%s: %s", cfg.buzzer_enabled, exc)
+
     # Subscribe to changes so we persist last_mounted whenever it changes.
     def _persist_last_mounted() -> None:
         m = controller.current
@@ -155,8 +176,38 @@ async def build_runtime(
     )
 
 
+def _auto_select_backend() -> GadgetBackend:
+    """Pick the best available backend based on what the kernel exposes.
+
+    Priority (override via env USB_FLOPPY_BACKEND=sysfs|configfs|mock):
+      1. Phase 2 kernel module sysfs class — preferred when available
+      2. Phase 1 configfs gadget tree — fallback for unmigrated installs
+      3. Hard error if neither — kernel modules not loaded
+    """
+    override = os.environ.get("USB_FLOPPY_BACKEND", "").strip().lower()
+    if override == "sysfs":
+        return SysfsBackend()
+    if override == "configfs":
+        return ConfigFsBackend()
+    if override == "mock":
+        from .gadget.backend import MockBackend
+        return MockBackend()
+
+    if Path("/sys/class/usb_floppy").exists():
+        logger.info("Phase 2 kernel module detected → SysfsBackend")
+        return SysfsBackend()
+    if Path("/sys/kernel/config").exists():
+        logger.info("Phase 1 configfs detected → ConfigFsBackend (legacy)")
+        return ConfigFsBackend()
+    raise RuntimeError(
+        "Neither /sys/class/usb_floppy nor /sys/kernel/config available. "
+        "Is the kernel module loaded? (g_floppy for Phase 2, libcomposite "
+        "for Phase 1)"
+    )
+
+
 async def _main_async(config_path: Path, floppy_root: Path, port: int) -> None:
-    backend = ConfigFsBackend()
+    backend = _auto_select_backend()
     runtime = await build_runtime(
         config_path=config_path,
         floppy_root=floppy_root,

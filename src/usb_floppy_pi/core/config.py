@@ -15,10 +15,15 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Config:
     mute: bool = False
-    buzzer_volume: float = 0.6
+    buzzer_volume: float = 0.6  # Phase 1 — kept for backwards compat with old config files
     last_mounted: dict[str, str] | None = None
     samba_share_name: str = "floppies"
     log_level: str = "INFO"
+    # Phase 2 additions (applied to backend at startup; safe defaults match
+    # the kernel module's own boot defaults).
+    speed_preset: str = "floppy-real"
+    volume: int = 70
+    buzzer_enabled: bool = True
 
 
 DEFAULT_CONFIG = Config()

@@ -89,3 +89,20 @@ class MockBackend:
     def detach_from_udc(self) -> None:
         self.attached = False
         self.ops_log.append("detach")
+
+    # --- Phase 2 hooks: record but don't enforce semantics in tests ---------
+
+    def set_speed_preset(self, preset: str) -> None:
+        self.ops_log.append(f"set_speed_preset({preset})")
+
+    def set_volume(self, volume: int) -> None:
+        self.ops_log.append(f"set_volume({volume})")
+
+    def set_mute(self, mute: bool) -> None:
+        self.ops_log.append(f"set_mute({mute})")
+
+    def set_buzzer_enabled(self, enabled: bool) -> None:
+        self.ops_log.append(f"set_buzzer_enabled({enabled})")
+
+    def get_metrics(self) -> dict:
+        return {}

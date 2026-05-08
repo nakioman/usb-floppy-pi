@@ -91,3 +91,39 @@ def test_load_returns_defaults_for_non_object_json(tmp_path: Path) -> None:
 
 def test_default_config_is_stable() -> None:
     assert DEFAULT_CONFIG == Config()
+
+
+def test_config_has_phase2_fields() -> None:
+    cfg = Config()
+    assert cfg.speed_preset == "floppy-real"
+    assert cfg.volume == 70
+    assert cfg.buzzer_enabled is True
+
+
+def test_load_phase2_fields_from_json(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "speed_preset": "floppy-fast",
+                "volume": 30,
+                "mute": True,
+                "buzzer_enabled": False,
+            }
+        )
+    )
+    cfg = load_config(cfg_path)
+    assert cfg.speed_preset == "floppy-fast"
+    assert cfg.volume == 30
+    assert cfg.mute is True
+    assert cfg.buzzer_enabled is False
+
+
+def test_phase2_fields_round_trip_save_load(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.json"
+    cfg = Config(speed_preset="unthrottled", volume=15, buzzer_enabled=False)
+    save_config(cfg_path, cfg)
+    re_read = load_config(cfg_path)
+    assert re_read.speed_preset == "unthrottled"
+    assert re_read.volume == 15
+    assert re_read.buzzer_enabled is False

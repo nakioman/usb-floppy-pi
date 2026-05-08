@@ -180,6 +180,28 @@ class ConfigFsBackend:
         if udc_path.exists():
             _write(udc_path, "\n")
 
+    # --- Phase 2 capabilities not supported by configfs gadget --------------
+    # The Phase 1 module (g_mass_storage / configfs) doesn't expose throttle
+    # or buzzer controls. We accept the calls so __main__ can apply config
+    # uniformly, but they're no-ops; user gets a log warning the first time
+    # they try to change a Phase 2 setting on a Phase 1 install.
+
+    def set_speed_preset(self, preset: str) -> None:
+        logger.debug("ConfigFsBackend: set_speed_preset(%r) ignored "
+                     "(Phase 2 kernel module not loaded)", preset)
+
+    def set_volume(self, volume: int) -> None:
+        logger.debug("ConfigFsBackend: set_volume(%d) ignored", volume)
+
+    def set_mute(self, mute: bool) -> None:
+        logger.debug("ConfigFsBackend: set_mute(%s) ignored", mute)
+
+    def set_buzzer_enabled(self, enabled: bool) -> None:
+        logger.debug("ConfigFsBackend: set_buzzer_enabled(%s) ignored", enabled)
+
+    def get_metrics(self) -> dict:
+        return {}
+
 
 def _write(path: Path, value: str) -> None:
     """Write a value to a configfs attribute, creating it if needed."""
