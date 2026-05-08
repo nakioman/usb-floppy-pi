@@ -3336,6 +3336,37 @@ git commit -m "deploy(install): integrate DKMS install, Phase 1 cleanup, PWM ove
 
 ---
 
+## Phase 2.7 — Deployment validation log (2026-05-08)
+
+End-to-end install validated on Pi Zero 2W (kernel `6.12.75+rpt-rpi-v8`):
+
+- ✅ `install.sh` is idempotent — re-run after partial install / Phase 1
+  cleanup completes without manual intervention
+- ✅ DKMS install succeeds — modules persist as
+  `/lib/modules/.../updates/dkms/{g_floppy,usb_f_floppy}.ko.xz`
+- ✅ Boot-time auto-load via `/etc/modules-load.d/usb-floppy-pi.conf` —
+  after `reboot`, `lsmod` shows `g_floppy`, `usb_f_floppy`, `libcomposite`
+  with no manual `modprobe` needed
+- ✅ Module parameters from `/etc/modprobe.d/usb-floppy-pi.conf` applied —
+  `cat /sys/class/usb_floppy/usb-floppy-pi/speed_preset` → `floppy-real`
+- ✅ `blank.img` + `current.img` symlink created — atomic retarget on
+  mount/eject works
+- ✅ `usb-floppy-pi.service` activates after reboot, restores last-mounted
+  image, UDC reaches `configured`, host enumerates the floppy
+- ✅ Web API `/api/state` returns full Phase 2 metrics (lun0_file, ro,
+  speed_preset, speed_read_kbps, speed_write_kbps, seek_us)
+
+**Deviations from the plan:**
+- DKMS default `parallel_jobs=$(nproc)` (= 4 on Pi Zero 2W) **OOMs** the
+  cc1 process during kernel-module compilation. Workaround added to
+  `install.sh`: drops `/etc/dkms/framework.conf.d/usb-floppy-pi.conf` with
+  `parallel_jobs=1`. Adds ~10 min to first build but unblocks the install.
+- Phase 2.4 (HW PWM buzzer) is **deferred** — speed throttle covers the
+  primary "feels like a real floppy" goal. The sysfs class still exposes
+  `volume`/`mute`/`buzzer` placeholders for the web UI; their backing
+  attributes are not currently created by the kernel module, and the API
+  reports them as `null`.
+
 ## Task 22: Update README + final smoke test
 
 Document the new state and verify the whole flow on real hardware.

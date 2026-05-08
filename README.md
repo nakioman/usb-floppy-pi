@@ -4,18 +4,29 @@ USB floppy drive emulator for Raspberry Pi Zero 2W. Connects to a retro PC via U
 
 Designed for a 2010-era PC running DOS / Win98 SE dual-boot, but works as a generic USB floppy on any host.
 
-## Phase 1 status
+## Status
 
-✅ USB Mass Storage gadget (configfs)
-✅ Web UI for browsing, mounting, ejecting, uploading
+**Phase 1 — USB Mass Storage gadget (configfs):** ✅ shipped
+**Phase 2 — Custom kernel module + speed throttle + Floppy identity:** ✅ shipped
+**Phase 2.4 — Buzzer audio:** ⏳ deferred (separate sub-plan)
+
+✅ USB Mass Storage gadget — out-of-tree fork (`g_floppy`, `usb_f_floppy`)
+   that always identifies as a 1.44 MB Floppy Disk Drive (Windows shows `A:`
+   even with no media)
+✅ Configurable speed throttle: `floppy-real` (~50 KB/s read, 30 KB/s
+   write, 6 ms seek), `floppy-fast`, `unthrottled` — switchable from web UI
+✅ Web UI for browsing, mounting, ejecting, uploading + hardware controls
+   (speed preset, volume placeholder, buzzer placeholder)
 ✅ Samba share for drag-and-drop image management from any machine on the LAN
 ✅ `.img`/`.ima`/`.imz` upload formats (auto-normalized to `.img`)
-✅ Last-mounted image restored on boot
+✅ Last-mounted image restored on boot; `blank.img` fallback on eject so
+   Windows never re-classifies the device as a generic USB drive
 ✅ Read-only and session mount modes
+✅ DKMS-packaged kernel module — survives apt kernel upgrades
 
-⏳ LCD + buttons + buzzer audio — Phase 2/3 (separate plans)
+⏳ LCD + physical buttons + buzzer audio — Phase 2.4 / Phase 3
 
-## Hardware (Phase 1)
+## Hardware
 
 - Raspberry Pi Zero 2W
 - microSD ≥ 8 GB
@@ -32,6 +43,20 @@ git clone <repo-url> usb-floppy-pi
 cd usb-floppy-pi
 sudo ./deploy/install.sh
 ```
+
+The installer is **idempotent** — safe to re-run after upgrades or partial
+installs. It:
+
+- installs the `g_floppy` + `usb_f_floppy` kernel modules via DKMS (so they
+  rebuild automatically on every kernel upgrade),
+- writes `/etc/modules-load.d/usb-floppy-pi.conf` and
+  `/etc/modprobe.d/usb-floppy-pi.conf` so the modules auto-load at boot
+  with the right parameters,
+- limits DKMS parallelism to `-j1` via `/etc/dkms/framework.conf.d/`
+  (Pi Zero 2W's 512 MB RAM OOMs on the default `-j$(nproc)`),
+- creates `/var/lib/usb-floppy-pi/blank.img` (a pre-formatted FAT12 image)
+  and a `current.img` symlink the Python service repoints when you mount
+  / eject — guarantees Windows always classifies the device as a Floppy.
 
 4. Reboot: `sudo reboot`
 
@@ -67,9 +92,24 @@ pip install -e ".[dev]"
 pytest -v
 ```
 
-The configfs gadget backend (`src/usb_floppy_pi/gadget/configfs_backend.py`) is verified manually on the Pi (see Task 22 of the Phase 1 plan).
+The configfs gadget backend (`src/usb_floppy_pi/gadget/configfs_backend.py`)
+and the SysfsBackend (`src/usb_floppy_pi/gadget/sysfs_backend.py`) are
+verified manually on the Pi.
+
+The kernel module lives in `kernel/` (`f_floppy.c`, `g_floppy_main.c`,
+`storage_common.c`, `floppy_throttle.c`). It's an out-of-tree fork of
+`f_mass_storage` patched to always advertise a Floppy Disk Drive identity
+and to throttle reads/writes/seeks via `floppy_throttle.{c,h}`. Build it
+locally with:
+
+```bash
+make -C kernel KDIR=/lib/modules/$(uname -r)/build
+```
+
+(but on the Pi, just re-run `deploy/install.sh` — DKMS handles it.)
 
 ## Spec & plans
 
 - Spec: `docs/superpowers/specs/2026-05-06-usb-floppy-pi-design.md`
 - Phase 1 plan: `docs/superpowers/plans/2026-05-06-phase-1-mvp-headless.md`
+- Phase 2 plan: `docs/superpowers/plans/2026-05-07-phase-2-kernel-module.md`
