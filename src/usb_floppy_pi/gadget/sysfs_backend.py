@@ -27,14 +27,33 @@ class SysfsBackend:
     """Backend for the Phase 2 kernel module."""
 
     DEFAULT_ROOT = Path("/sys/class/usb_floppy/usb-floppy-pi")
+    # Defaults match the install.sh layout. When current_symlink_path and
+    # blank_image_path are both provided, configure_lun updates the symlink
+    # so the next boot's modprobe (which reads /etc/modprobe.d/...
+    # file=/var/lib/usb-floppy-pi/current.img) sees the same image.
+    DEFAULT_CURRENT_SYMLINK = Path("/var/lib/usb-floppy-pi/current.img")
+    DEFAULT_BLANK_IMAGE = Path("/var/lib/usb-floppy-pi/blank.img")
 
-    def __init__(self, sysfs_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        sysfs_root: Path | None = None,
+        *,
+        current_symlink_path: Path | None = None,
+        blank_image_path: Path | None = None,
+    ) -> None:
         self._root = sysfs_root or self.DEFAULT_ROOT
         if not self._root.exists():
             raise FileNotFoundError(
                 f"Kernel module sysfs not found at {self._root}; "
                 "is g_floppy.ko loaded?"
             )
+        # Symlink + blank are optional (off by default to keep tests pure).
+        # Both must be set for the symlink-update path to activate.
+        self._current_symlink = current_symlink_path
+        self._blank = blank_image_path
+        self._symlink_managed = (
+            self._current_symlink is not None and self._blank is not None
+        )
 
     # --- GadgetBackend Protocol ---------------------------------------------
 
@@ -54,19 +73,42 @@ class SysfsBackend:
     def configure_lun(self, *, file: Path | None, ro: bool) -> None:
         """Mount/eject the LUN. The kernel rejects ro changes while a file
         is attached, so the safe pattern is: detach, brief settle, set ro,
-        attach new file. Mirrors the dance ConfigFsBackend does in Phase 1."""
-        # Detach the current backing file (no-op if already empty).
-        # We write "\n" instead of "" because the kernel handler ignores
-        # zero-byte writes — same workaround as ConfigFsBackend.
+        attach new file. Mirrors the dance ConfigFsBackend does in Phase 1.
+
+        Also updates current.img symlink (if managed) so the next boot's
+        modprobe loads with the same target — avoids the "first enumerate
+        without media → Windows demotes to USB Drive" trap.
+        """
+        # 1. Update the symlink first so even if the rest fails halfway, the
+        #    next boot reflects the user's last intent.
+        if self._symlink_managed:
+            self._update_current_symlink(file)
+
+        # 2. Detach the current backing file. We write "\n" instead of ""
+        #    because the kernel handler ignores zero-byte writes.
         self._write("lun0_file", "\n")
         if file is None:
             return
         time.sleep(0.05)  # let kernel release the LUN before flipping ro
         self._write("lun0_ro", "1" if ro else "0")
-        # as_posix() instead of str() so Windows-side tests don't end up
-        # writing backslashes; the kernel always interprets these paths as
-        # POSIX regardless of where Python was running.
+        # as_posix() so Windows-side tests don't write backslashes;
+        # the kernel always interprets these paths as POSIX.
         self._write("lun0_file", file.as_posix())
+
+    def _update_current_symlink(self, target: Path | None) -> None:
+        """Point current.img at `target` (or blank.img if None). Idempotent."""
+        link = self._current_symlink
+        new_target = target if target is not None else self._blank
+        # Replace the symlink atomically: unlink then symlink_to.
+        # If link is a regular file (manual install error), preserve it by
+        # renaming aside.
+        if link.exists() or link.is_symlink():
+            if link.is_symlink():
+                link.unlink()
+            else:
+                link.rename(link.with_suffix(link.suffix + ".bak"))
+        link.symlink_to(new_target)
+        logger.debug("current.img → %s", new_target)
 
     def attach_to_udc(self) -> None:
         # Kernel auto-attaches at module load. No runtime API.

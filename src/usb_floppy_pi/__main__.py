@@ -176,6 +176,21 @@ async def build_runtime(
     )
 
 
+def _build_sysfs_backend() -> SysfsBackend:
+    """Build SysfsBackend with the current.img symlink + blank.img paths
+    install.sh sets up. If those paths don't exist (e.g., dev box without
+    install.sh having been run), fall back to a backend that doesn't
+    manage the symlink — sysfs writes still work."""
+    current = Path("/var/lib/usb-floppy-pi/current.img")
+    blank = Path("/var/lib/usb-floppy-pi/blank.img")
+    if blank.exists() and current.parent.exists():
+        return SysfsBackend(
+            current_symlink_path=current,
+            blank_image_path=blank,
+        )
+    return SysfsBackend()
+
+
 def _auto_select_backend() -> GadgetBackend:
     """Pick the best available backend based on what the kernel exposes.
 
@@ -186,7 +201,7 @@ def _auto_select_backend() -> GadgetBackend:
     """
     override = os.environ.get("USB_FLOPPY_BACKEND", "").strip().lower()
     if override == "sysfs":
-        return SysfsBackend()
+        return _build_sysfs_backend()
     if override == "configfs":
         return ConfigFsBackend()
     if override == "mock":
@@ -195,7 +210,7 @@ def _auto_select_backend() -> GadgetBackend:
 
     if Path("/sys/class/usb_floppy").exists():
         logger.info("Phase 2 kernel module detected → SysfsBackend")
-        return SysfsBackend()
+        return _build_sysfs_backend()
     if Path("/sys/kernel/config").exists():
         logger.info("Phase 1 configfs detected → ConfigFsBackend (legacy)")
         return ConfigFsBackend()

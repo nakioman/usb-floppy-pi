@@ -1,10 +1,15 @@
 [Unit]
 Description=USB Floppy Pi
-# We only depend on kernel modules being loaded so the gadget can be created.
+# In Phase 2 the kernel module (g_floppy) gets auto-loaded by
+# systemd-modules-load.service from /etc/modules-load.d/usb-floppy-pi.conf
+# and creates /sys/class/usb_floppy/usb-floppy-pi/. We just have to wait
+# for that to be ready.
+#
 # Network is needed for the web UI but uvicorn binds 0.0.0.0:80 happily even
-# before WiFi associates — connections will start succeeding as soon as DHCP
-# completes, no need to BLOCK boot on it.
-# Samba (smbd) is independent — its slowness shouldn't delay the gadget.
+# before WiFi associates — connections start succeeding as soon as DHCP
+# completes. No need to BLOCK boot on network-online.
+#
+# Samba (smbd) is independent — its slowness shouldn't delay our service.
 After=systemd-modules-load.service local-fs.target
 DefaultDependencies=yes
 
@@ -15,8 +20,11 @@ WorkingDirectory=/opt/usb-floppy-pi
 Environment=USB_FLOPPY_CONFIG=/etc/usb-floppy-pi/config.json
 Environment=USB_FLOPPY_ROOT=/home/pi/floppies
 Environment=USB_FLOPPY_PORT=80
-ExecStartPre=/sbin/modprobe libcomposite
-ExecStartPre=/bin/sh -c 'mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config'
+# Fallback: if for some reason modules-load didn't auto-load g_floppy
+# (e.g. missing /etc/modules-load.d entry on a partial install), force-load
+# it here. modprobe pulls usb_f_floppy + libcomposite via dependencies.
+# Failure is OK — the next line will re-detect either Phase 2 or Phase 1.
+ExecStartPre=-/sbin/modprobe g_floppy
 ExecStart=/opt/usb-floppy-pi/.venv/bin/python -m usb_floppy_pi
 Restart=on-failure
 RestartSec=3

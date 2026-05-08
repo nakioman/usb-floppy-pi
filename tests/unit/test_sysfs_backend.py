@@ -174,3 +174,73 @@ def test_get_metrics_includes_phase24_attrs_when_present(fake_sysfs: Path) -> No
     assert metrics["volume"] == 70
     assert metrics["mute"] is False
     assert metrics["buzzer"] is True
+
+
+# --- current.img symlink + blank.img fallback ---------------------------
+
+
+@pytest.fixture
+def deploy_paths(tmp_path: Path) -> dict[str, Path]:
+    """Create a fake /var/lib/usb-floppy-pi tree with blank.img + current.img symlink."""
+    var = tmp_path / "var" / "lib" / "usb-floppy-pi"
+    var.mkdir(parents=True)
+    blank = var / "blank.img"
+    blank.write_bytes(b"\x00" * 1474560)
+    current = var / "current.img"
+    current.symlink_to(blank)
+    return {"blank": blank, "current": current}
+
+
+def test_configure_lun_updates_symlink_to_target(
+    fake_sysfs: Path, deploy_paths: dict[str, Path], tmp_path: Path
+) -> None:
+    real = tmp_path / "real.img"
+    real.write_bytes(b"\x00" * 1474560)
+
+    backend = SysfsBackend(
+        sysfs_root=fake_sysfs,
+        current_symlink_path=deploy_paths["current"],
+        blank_image_path=deploy_paths["blank"],
+    )
+    backend.configure_lun(file=real, ro=False)
+
+    # Symlink now points at the real image so the next boot's modprobe loads it.
+    assert deploy_paths["current"].is_symlink()
+    assert deploy_paths["current"].resolve() == real.resolve()
+    # And sysfs got updated too (live kernel detach + reattach).
+    assert (fake_sysfs / "lun0_file").read_text().strip() == real.as_posix()
+
+
+def test_configure_lun_eject_points_symlink_to_blank(
+    fake_sysfs: Path, deploy_paths: dict[str, Path], tmp_path: Path
+) -> None:
+    real = tmp_path / "real.img"
+    real.write_bytes(b"\x00" * 1474560)
+    # Start: symlink → real (simulating "user has X mounted")
+    deploy_paths["current"].unlink()
+    deploy_paths["current"].symlink_to(real)
+
+    backend = SysfsBackend(
+        sysfs_root=fake_sysfs,
+        current_symlink_path=deploy_paths["current"],
+        blank_image_path=deploy_paths["blank"],
+    )
+    backend.configure_lun(file=None, ro=False)
+
+    # Eject → symlink falls back to blank.img so next boot still has media.
+    assert deploy_paths["current"].is_symlink()
+    assert deploy_paths["current"].resolve() == deploy_paths["blank"].resolve()
+    # Sysfs eject (newline write).
+    assert (fake_sysfs / "lun0_file").read_text() == "\n"
+
+
+def test_configure_lun_works_without_symlink_paths(fake_sysfs: Path, tmp_path: Path) -> None:
+    """When SysfsBackend is constructed without symlink paths, configure_lun
+    only touches sysfs (no filesystem mutation outside /sys)."""
+    real = tmp_path / "real.img"
+    real.write_bytes(b"\x00" * 1474560)
+    backend = SysfsBackend(sysfs_root=fake_sysfs)
+    backend.configure_lun(file=real, ro=False)
+    assert (fake_sysfs / "lun0_file").read_text().strip() == real.as_posix()
+    # No symlink file should have been created in the test workspace.
+    assert not (tmp_path / "current.img").exists()
