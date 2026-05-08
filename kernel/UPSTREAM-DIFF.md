@@ -89,3 +89,10 @@ change vs upstream.)
   to detect track changes. Verified module loads with
   "throttle init, default preset=floppy-real" log message.
   Sysfs interface for the preset comes in Task 10.
+- 2026-05-08: g_floppy_main.c — added speed_preset module param (default
+  "floppy-real") that's applied at the end of msg_bind, plus 4 sysfs
+  attrs: speed_preset (rw, accepts "floppy-real"/"floppy-fast"/
+  "unthrottled" or returns -EINVAL), speed_read_kbps (ro), speed_write_kbps
+  (ro), seek_us (ro). Runtime switching verified: load with
+  speed_preset=floppy-fast → cat shows 200 KB/s, echo unthrottled → cat
+  shows 0/0/0, echo invalid-name → exit 1 (rejected).

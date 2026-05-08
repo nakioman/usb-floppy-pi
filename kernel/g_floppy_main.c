@@ -30,6 +30,7 @@
 #include <linux/device.h>
 #include <linux/sysfs.h>
 #include "storage_common.h"
+#include "floppy_throttle.h"
 
 /*-------------------------------------------------------------------------*/
 
@@ -152,10 +153,59 @@ static ssize_t lun0_inquiry_string_store(struct device *d,
 }
 static DEVICE_ATTR_RW(lun0_inquiry_string);
 
+/* Speed preset (rw) — switches between floppy-real / floppy-fast / unthrottled
+ * at runtime. Three derived read-only attrs (speed_read_kbps, speed_write_kbps,
+ * seek_us) reflect the resolved values for inspection / scripting. */
+
+static ssize_t speed_preset_show(struct device *d, struct device_attribute *a,
+				  char *buf)
+{
+	return floppy_throttle_show_preset(floppy_throttle_get(), buf);
+}
+
+static ssize_t speed_preset_store(struct device *d, struct device_attribute *a,
+				   const char *buf, size_t count)
+{
+	int err = floppy_throttle_set_preset(floppy_throttle_get(), buf);
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(speed_preset);
+
+static ssize_t speed_read_kbps_show(struct device *d,
+				    struct device_attribute *a, char *buf)
+{
+	struct floppy_throttle_state *st = floppy_throttle_get();
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+			 st ? floppy_throttle_read_kbps(st) : 0);
+}
+static DEVICE_ATTR_RO(speed_read_kbps);
+
+static ssize_t speed_write_kbps_show(struct device *d,
+				     struct device_attribute *a, char *buf)
+{
+	struct floppy_throttle_state *st = floppy_throttle_get();
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+			 st ? floppy_throttle_write_kbps(st) : 0);
+}
+static DEVICE_ATTR_RO(speed_write_kbps);
+
+static ssize_t seek_us_show(struct device *d,
+			    struct device_attribute *a, char *buf)
+{
+	struct floppy_throttle_state *st = floppy_throttle_get();
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+			 st ? floppy_throttle_seek_us(st) : 0);
+}
+static DEVICE_ATTR_RO(seek_us);
+
 static struct attribute *usb_floppy_attrs[] = {
 	&dev_attr_lun0_file.attr,
 	&dev_attr_lun0_ro.attr,
 	&dev_attr_lun0_inquiry_string.attr,
+	&dev_attr_speed_preset.attr,
+	&dev_attr_speed_read_kbps.attr,
+	&dev_attr_speed_write_kbps.attr,
+	&dev_attr_seek_us.attr,
 	NULL,
 };
 
@@ -223,6 +273,15 @@ static unsigned int fsg_num_buffers = CONFIG_USB_GADGET_STORAGE_NUM_BUFFERS;
 #endif /* CONFIG_USB_GADGET_DEBUG_FILES */
 
 FSG_MODULE_PARAMETERS(/* no prefix */, mod_data);
+
+/* usb-floppy-pi: speed preset module param. Resolved at the end of msg_bind
+ * after fi_msg + the throttle state are both initialised. Default mirrors
+ * the throttle's own boot default (floppy-real). */
+static char *speed_preset_param = "floppy-real";
+module_param_named(speed_preset, speed_preset_param, charp, 0444);
+MODULE_PARM_DESC(speed_preset,
+	"Initial speed preset: floppy-real (default, ~50 KB/s) | "
+	"floppy-fast (~200 KB/s) | unthrottled");
 
 static int msg_do_config(struct usb_configuration *c)
 {
@@ -320,6 +379,18 @@ static int msg_bind(struct usb_composite_dev *cdev)
 			dev_warn(&cdev->gadget->dev,
 				"g_floppy: sysfs class registration failed (%d), continuing\n",
 				sysfs_err);
+	}
+
+	/* usb-floppy-pi: apply the user-selected initial speed preset. The
+	 * throttle was init'd by usb_f_floppy.ko with default "floppy-real";
+	 * if the user passed a different preset on the cmdline we switch now. */
+	if (strcmp(speed_preset_param, "floppy-real") != 0) {
+		int err = floppy_throttle_set_preset(floppy_throttle_get(),
+						     speed_preset_param);
+		if (err)
+			dev_warn(&cdev->gadget->dev,
+				"g_floppy: bad speed_preset='%s', staying on floppy-real\n",
+				speed_preset_param);
 	}
 	return 0;
 
