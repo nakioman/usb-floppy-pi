@@ -96,3 +96,12 @@ change vs upstream.)
   (ro), seek_us (ro). Runtime switching verified: load with
   speed_preset=floppy-fast → cat shows 200 KB/s, echo unthrottled → cat
   shows 0/0/0, echo invalid-name → exit 1 (rejected).
+- 2026-05-08: Added kernel/dkms.conf and kernel/README.md. Verified DKMS
+  install end-to-end on Pi:
+    sudo cp -r kernel /usr/src/g-floppy-0.1.0
+    sudo dkms add/build/install -m g-floppy -v 0.1.0
+  After install, both .ko.xz files appear in
+  /lib/modules/$(uname -r)/updates/dkms/, depmod registers the dependency
+  chain, and `modprobe g_floppy file=...` works system-wide without
+  absolute paths. Survives reboot — the .ko stays installed, just needs
+  /etc/modules-load.d entry to auto-load (Phase 2.7 work).
