@@ -311,3 +311,69 @@ def test_post_upload_strips_path_components_from_filename(app_with_data, tmp_pat
         assert r.status_code == 200
         assert (tmp_path / "DOS 6.22" / "EVIL.img").exists()
         assert not (tmp_path / "EVIL.img").exists()
+
+
+# --- Phase 2 hardware control endpoints ----------------------------------
+
+
+def test_post_speed_valid_preset(app_with_data) -> None:
+    app, _, _, backend = app_with_data
+    with TestClient(app) as client:
+        r = client.post("/api/speed", json={"preset": "floppy-fast"})
+        assert r.status_code == 200
+        assert r.json() == {"preset": "floppy-fast"}
+        assert "set_speed_preset(floppy-fast)" in backend.ops_log
+
+
+def test_post_speed_unknown_preset(app_with_data) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post("/api/speed", json={"preset": "blast-mode"})
+        assert r.status_code == 400
+
+
+def test_post_volume_valid(app_with_data) -> None:
+    app, _, _, backend = app_with_data
+    with TestClient(app) as client:
+        r = client.post("/api/volume", json={"volume": 45})
+        assert r.status_code == 200
+        assert r.json() == {"volume": 45}
+        assert "set_volume(45)" in backend.ops_log
+
+
+def test_post_volume_out_of_range(app_with_data) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.post("/api/volume", json={"volume": 250})
+        assert r.status_code == 400
+        r = client.post("/api/volume", json={"volume": -5})
+        assert r.status_code == 400
+
+
+def test_post_mute(app_with_data) -> None:
+    app, _, _, backend = app_with_data
+    with TestClient(app) as client:
+        r = client.post("/api/mute", json={"mute": True})
+        assert r.status_code == 200
+        assert r.json() == {"mute": True}
+        assert "set_mute(True)" in backend.ops_log
+
+
+def test_post_buzzer(app_with_data) -> None:
+    app, _, _, backend = app_with_data
+    with TestClient(app) as client:
+        r = client.post("/api/buzzer", json={"enabled": False})
+        assert r.status_code == 200
+        assert r.json() == {"enabled": False}
+        assert "set_buzzer_enabled(False)" in backend.ops_log
+
+
+def test_get_state_includes_metrics(app_with_data) -> None:
+    app, _, _, _ = app_with_data
+    with TestClient(app) as client:
+        r = client.get("/api/state")
+        assert r.status_code == 200
+        body = r.json()
+        assert "metrics" in body
+        # MockBackend returns {} so this just confirms the field is present.
+        assert isinstance(body["metrics"], dict)

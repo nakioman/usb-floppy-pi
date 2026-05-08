@@ -36,6 +36,25 @@ class ReadOnlyRequest(BaseModel):
     ro: bool
 
 
+class SpeedRequest(BaseModel):
+    preset: str
+
+
+class VolumeRequest(BaseModel):
+    volume: int
+
+
+class MuteRequest(BaseModel):
+    mute: bool
+
+
+class BuzzerRequest(BaseModel):
+    enabled: bool
+
+
+VALID_SPEED_PRESETS = {"floppy-real", "floppy-fast", "unthrottled"}
+
+
 def build_app(
     *,
     library: Library,
@@ -75,6 +94,11 @@ def build_app(
     @app.get("/api/state")
     def get_state() -> dict:
         m = controller.current
+        try:
+            metrics = controller.backend.get_metrics()
+        except Exception as exc:
+            logger.debug("get_metrics failed (%s); returning empty", exc)
+            metrics = {}
         return {
             "mounted": (
                 asdict(m)
@@ -83,7 +107,8 @@ def build_app(
                 }
             )
             if m
-            else None
+            else None,
+            "metrics": metrics,
         }
 
     @app.post("/api/mount")
@@ -100,6 +125,50 @@ def build_app(
     async def post_eject() -> dict:
         await controller.eject()
         return {"mounted": None}
+
+    # --- Phase 2 hardware controls -----------------------------------------
+
+    @app.post("/api/speed")
+    def post_speed(req: SpeedRequest) -> dict:
+        if req.preset not in VALID_SPEED_PRESETS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown preset {req.preset!r}; "
+                f"valid: {sorted(VALID_SPEED_PRESETS)}",
+            )
+        try:
+            controller.backend.set_speed_preset(req.preset)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"preset": req.preset}
+
+    @app.post("/api/volume")
+    def post_volume(req: VolumeRequest) -> dict:
+        if not 0 <= req.volume <= 100:
+            raise HTTPException(
+                status_code=400, detail="volume must be 0..100"
+            )
+        try:
+            controller.backend.set_volume(req.volume)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"volume": req.volume}
+
+    @app.post("/api/mute")
+    def post_mute(req: MuteRequest) -> dict:
+        try:
+            controller.backend.set_mute(req.mute)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"mute": req.mute}
+
+    @app.post("/api/buzzer")
+    def post_buzzer(req: BuzzerRequest) -> dict:
+        try:
+            controller.backend.set_buzzer_enabled(req.enabled)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"enabled": req.enabled}
 
     @app.post("/api/sets/{set_name}/readonly")
     async def post_readonly(set_name: str, req: ReadOnlyRequest) -> dict:

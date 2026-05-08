@@ -41,6 +41,12 @@ class GadgetController:
         self._current: MountedImage | None = None
 
     @property
+    def backend(self) -> GadgetBackend:
+        """Direct access to the backend for Phase 2 capability calls
+        (set_speed_preset, set_volume, get_metrics, etc.)."""
+        return self._backend
+
+    @property
     def current(self) -> MountedImage | None:
         return self._current
 
