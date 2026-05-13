@@ -125,10 +125,17 @@ class FloppyStepDetector:
         self._last_io_us: int = -10**9
 
     def has_pending(self) -> bool:
-        """True iff there are clicks still waiting to drain. Used by the
-        audio loop to decide between "tick fast to drain" and "block on
-        the kernel notifier (long timeout)"."""
-        return self._pending > 0
+        """Whether the detector has work the audio loop must drain across
+        multiple ticks.
+
+        With the burst-style design (each kernel-detected seek emits an
+        entire ``seek_burst`` rendered inline in one ``render()`` call),
+        there's no inter-tick state to drain — the loop is purely event-
+        driven, blocking on ``sysfs_notify`` between bursts. Returning
+        False keeps the loop in its idle-block mode at all times, which
+        is exactly what we want for the kernel-notify CPU win.
+        """
+        return False
 
     def tick(self, event: IOEvent, *, now_us: int) -> SoundCommand:
         # First observation: establish baseline. Don't fire any pre-existing
