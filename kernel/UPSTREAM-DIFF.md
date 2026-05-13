@@ -121,3 +121,8 @@ change vs upstream.)
   granularity. The Python audio module reads only this attr now and
   emits one click per increment. Tracking field `last_end_track` stores
   the end-of-last-request track between calls.
+- 2026-05-13: Linux 6.18 compat — added a fallback shim at the top of
+  f_floppy.c for the RELEASE → RELEASE_6 / RESERVE → RESERVE_6 rename
+  in <scsi/scsi_proto.h>, and switched the case labels to the new
+  canonical names. Verified DKMS auto-builds on both kernel 6.12.75 and
+  6.18.29 (v8 + 2712 variants) on the dev Pi.

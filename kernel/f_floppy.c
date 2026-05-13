@@ -211,6 +211,23 @@ static const char fsg_string_interface[] = "USB Floppy";
 #include "floppy_throttle.h"
 #include "floppy_io_events.h"
 
+/*
+ * Linux 6.18 renamed the SCSI command aliases RELEASE/RESERVE to their
+ * SCSI-spec-canonical RELEASE_6/RESERVE_6 in <scsi/scsi_proto.h>. The old
+ * names were deprecated for ages; the rename finally landed when the
+ * SCSI subsystem cleaned up the legacy aliases.
+ *
+ * We use the new names. For older kernels (< 6.18) that only define the
+ * legacy aliases, fall back to those. Keeps the source one-file-compiles
+ * against both old and new headers.
+ */
+#ifndef RELEASE_6
+#define RELEASE_6 RELEASE
+#endif
+#ifndef RESERVE_6
+#define RESERVE_6 RESERVE
+#endif
+
 /* usb-floppy-pi: throttle state owned by usb_f_floppy.ko, initialised at the
  * first fsg_alloc_inst() call and torn down at the last fsg_free_inst().
  * Lives in module BSS, not on a per-instance allocation, because we only
@@ -2238,8 +2255,8 @@ static int do_scsi_command(struct fsg_common *common)
 	 * of Posix locks.
 	 */
 	case FORMAT_UNIT:
-	case RELEASE:
-	case RESERVE:
+	case RELEASE_6:
+	case RESERVE_6:
 	case SEND_DIAGNOSTIC:
 
 	default:
