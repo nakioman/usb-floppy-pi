@@ -2,4 +2,8 @@
 dtoverlay=dwc2
 dtparam=i2c_arm=on
 dtparam=audio=off
+# Hardware PWM on GPIO 18 (BCM, header pin 12) for the floppy_buzzer driver.
+# func=2 sets the alt0 function on BCM2837 which routes the pin to PWM0.
+# Phase 2.4 buzzer module consumes /sys/class/pwm/pwmchip0/pwm0/ from kernel.
+dtoverlay=pwm,pin=18,func=2
 # === end usb-floppy-pi ===
