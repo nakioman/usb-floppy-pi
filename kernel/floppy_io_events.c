@@ -25,6 +25,8 @@ void floppy_io_event_init(struct floppy_io_event_state *st)
 	atomic_set(&st->last_lba, 0);
 	atomic_set(&st->last_is_write, 0);
 	atomic64_set(&st->last_us, 0);
+	atomic64_set(&st->track_crossings, 0);
+	atomic_set(&st->last_end_track, 0);
 	g_state = st;
 	pr_info("g_floppy: io_events tracker initialised\n");
 }
@@ -40,10 +42,39 @@ EXPORT_SYMBOL_GPL(floppy_io_event_exit);
 void floppy_io_event_record(struct floppy_io_event_state *st,
 			    u32 lba, u32 nblocks, bool is_write)
 {
-	if (!st)
+	u32 start_track, end_track, prev_end_track;
+	u32 crossings = 0;
+	u64 prev_total;
+
+	if (!st || nblocks == 0)
 		return;
+
+	start_track = lba / FLOPPY_SECTORS_PER_TRACK;
+	end_track = (lba + nblocks - 1) / FLOPPY_SECTORS_PER_TRACK;
+
+	/* Crossings WITHIN this request (multi-sector reads that span a
+	 * track boundary). On a 1.44MB disk a request crosses at most a few
+	 * tracks even at max length, so end_track-start_track is small. */
+	if (end_track > start_track)
+		crossings += end_track - start_track;
+
+	/* Crossings BETWEEN this request's start and the previous request's
+	 * end. Skip if this is the very first request. */
+	prev_total = atomic64_read(&st->total_blocks);
+	if (prev_total > 0) {
+		prev_end_track = (u32)atomic_read(&st->last_end_track);
+		if (start_track != prev_end_track)
+			crossings += (start_track > prev_end_track)
+				? (start_track - prev_end_track)
+				: (prev_end_track - start_track);
+	}
+
+	if (crossings > 0)
+		atomic64_add(crossings, &st->track_crossings);
+
 	atomic64_add(nblocks, &st->total_blocks);
 	atomic_set(&st->last_lba, (int)lba);
+	atomic_set(&st->last_end_track, (int)end_track);
 	atomic_set(&st->last_is_write, is_write ? 1 : 0);
 	atomic64_set(&st->last_us, ktime_to_us(ktime_get()));
 }
@@ -78,3 +109,9 @@ u64 floppy_io_event_last_us(struct floppy_io_event_state *st)
 	return (u64)atomic64_read(&st->last_us);
 }
 EXPORT_SYMBOL_GPL(floppy_io_event_last_us);
+
+u64 floppy_io_event_track_crossings(struct floppy_io_event_state *st)
+{
+	return (u64)atomic64_read(&st->track_crossings);
+}
+EXPORT_SYMBOL_GPL(floppy_io_event_track_crossings);

@@ -12,6 +12,11 @@ from pathlib import Path
 
 import uvicorn
 
+from .audio.buzzer import SysfsPWMBuzzer
+from .audio.io_events import SysfsIOEventReader
+from .audio.loop import AudioLoop
+from .audio.renderer import SoundRenderer
+from .audio.state_machine import MotorStateMachine
 from .core.config import Config, load_config, save_config
 from .gadget.backend import GadgetBackend, GadgetParams
 from .gadget.configfs_backend import ConfigFsBackend
@@ -191,6 +196,45 @@ def _build_sysfs_backend() -> SysfsBackend:
     return SysfsBackend()
 
 
+def _build_audio_loop(*, volume: int, mute: bool, enabled: bool) -> AudioLoop | None:
+    """Construct the audio loop if both the kernel I/O event sysfs and the
+    PWM sysfs are present. Returns None on any dev-box / pre-T11 setup
+    where either piece is missing — caller treats None as "no buzzer".
+
+    The PWM channel 0 is exported here if it isn't already.
+    """
+    pwm_chip = Path("/sys/class/pwm/pwmchip0")
+    sysfs_root = Path("/sys/class/usb_floppy/usb-floppy-pi")
+    if not pwm_chip.exists() or not sysfs_root.exists():
+        logger.info(
+            "audio: %s or %s missing — buzzer disabled",
+            pwm_chip,
+            sysfs_root,
+        )
+        return None
+    if not (pwm_chip / "pwm0").exists():
+        try:
+            (pwm_chip / "export").write_text("0\n")
+        except OSError as exc:
+            logger.warning("audio: could not export pwm0 (%s); buzzer disabled", exc)
+            return None
+
+    effective_volume = 0 if mute or not enabled else volume
+    buzzer = SysfsPWMBuzzer(pwmchip_path=pwm_chip, volume=effective_volume)
+    loop = AudioLoop(
+        reader=SysfsIOEventReader(sysfs_path=sysfs_root),
+        state_machine=MotorStateMachine(),
+        renderer=SoundRenderer(buzzer=buzzer),
+    )
+    logger.info(
+        "audio: buzzer initialised (volume=%d, mute=%s, enabled=%s)",
+        effective_volume,
+        mute,
+        enabled,
+    )
+    return loop
+
+
 def _auto_select_backend() -> GadgetBackend:
     """Pick the best available backend based on what the kernel exposes.
 
@@ -228,6 +272,19 @@ async def _main_async(config_path: Path, floppy_root: Path, port: int) -> None:
         floppy_root=floppy_root,
         gadget_backend=backend,
     )
+
+    # Audio buzzer (Phase 2.4) — independent of the gadget backend. Starts
+    # after the runtime is built so volume/mute from the persisted config
+    # are honoured from tick 0.
+    audio_loop = _build_audio_loop(
+        volume=runtime.config.volume,
+        mute=runtime.config.mute,
+        enabled=runtime.config.buzzer_enabled,
+    )
+    audio_task: asyncio.Task | None = None
+    if audio_loop is not None:
+        audio_task = asyncio.create_task(audio_loop.run())
+
     config = uvicorn.Config(
         runtime.app,
         host="0.0.0.0",
@@ -239,6 +296,12 @@ async def _main_async(config_path: Path, floppy_root: Path, port: int) -> None:
     try:
         await server.serve()
     finally:
+        if audio_task is not None:
+            audio_task.cancel()
+            try:
+                await audio_task
+            except asyncio.CancelledError:
+                pass
         await runtime.shutdown()
 
 

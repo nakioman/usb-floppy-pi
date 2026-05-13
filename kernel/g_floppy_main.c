@@ -240,6 +240,19 @@ static ssize_t last_io_us_show(struct device *d, struct device_attribute *a,
 }
 static DEVICE_ATTR_RO(last_io_us);
 
+/* track_crossings (RO) — cumulative count of track-boundary crossings the
+ * gadget driver has observed, including crossings WITHIN a single
+ * multi-sector request. Userspace audio polls this; every increment is
+ * one real seek and should produce one stepper-motor click. */
+static ssize_t track_crossings_show(struct device *d,
+				     struct device_attribute *a, char *buf)
+{
+	struct floppy_io_event_state *st = floppy_io_event_get();
+	return scnprintf(buf, PAGE_SIZE, "%llu\n",
+			 st ? floppy_io_event_track_crossings(st) : 0ULL);
+}
+static DEVICE_ATTR_RO(track_crossings);
+
 static struct attribute *usb_floppy_attrs[] = {
 	&dev_attr_lun0_file.attr,
 	&dev_attr_lun0_ro.attr,
@@ -252,6 +265,7 @@ static struct attribute *usb_floppy_attrs[] = {
 	&dev_attr_last_io_lba.attr,
 	&dev_attr_last_io_write.attr,
 	&dev_attr_last_io_us.attr,
+	&dev_attr_track_crossings.attr,
 	NULL,
 };
 

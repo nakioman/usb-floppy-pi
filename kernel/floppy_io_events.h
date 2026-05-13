@@ -26,11 +26,30 @@
  * an atomic snapshot of all four fields together.
  */
 
+/* 1.44MB HD floppy CHS: 80 cylinders × 2 heads × 18 sectors/track. We use
+ * 36 (= 18 × 2) so a "track" boundary is crossed only when the head
+ * physically steps — same heuristic floppy_throttle.c uses. */
+#define FLOPPY_SECTORS_PER_TRACK 36
+
 struct floppy_io_event_state {
 	atomic64_t	total_blocks;	/* cumulative blocks ever transferred */
 	atomic_t	last_lba;	/* LBA of most recent I/O */
 	atomic_t	last_is_write;	/* 1=write, 0=read */
 	atomic64_t	last_us;	/* CLOCK_MONOTONIC microseconds */
+
+	/* Track-crossing counter — incremented on every track step the
+	 * gadget driver observes. Includes both crossings WITHIN a single
+	 * multi-sector request (computed from lba+nblocks) and crossings
+	 * BETWEEN consecutive requests (when the start track differs from
+	 * the previous request's end track). The Python audio service uses
+	 * this directly instead of inferring crossings from last_lba — far
+	 * more accurate, doesn't miss seeks hidden inside multi-track reads.
+	 *
+	 * `last_end_track` carries the end-of-last-request track between
+	 * record() calls. INT_MIN-equivalent sentinel "no previous request"
+	 * is just total_blocks == 0. */
+	atomic64_t	track_crossings;
+	atomic_t	last_end_track;
 };
 
 void floppy_io_event_init(struct floppy_io_event_state *st);
@@ -48,5 +67,6 @@ u64  floppy_io_event_total_blocks(struct floppy_io_event_state *st);
 u32  floppy_io_event_last_lba(struct floppy_io_event_state *st);
 bool floppy_io_event_last_is_write(struct floppy_io_event_state *st);
 u64  floppy_io_event_last_us(struct floppy_io_event_state *st);
+u64  floppy_io_event_track_crossings(struct floppy_io_event_state *st);
 
 #endif /* FLOPPY_IO_EVENTS_H */

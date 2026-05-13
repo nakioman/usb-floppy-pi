@@ -113,3 +113,11 @@ change vs upstream.)
   right after the throttle hooks (atomics only, no locks). State shares
   the throttle's refcount/mutex for init/exit. g_floppy_main.c exposes 4
   new read-only attrs: io_counter, last_io_lba, last_io_write, last_io_us.
+- 2026-05-13: Added a 5th attr `track_crossings` — kernel-side counter
+  that increments by the number of 36-sector track boundaries each
+  do_read/do_write request crosses, INCLUDING crossings inside a single
+  multi-sector request. LBA-polling from userspace can miss those (it
+  only sees the start LBA), so this gives the buzzer real seek-by-seek
+  granularity. The Python audio module reads only this attr now and
+  emits one click per increment. Tracking field `last_end_track` stores
+  the end-of-last-request track between calls.
