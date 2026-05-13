@@ -88,16 +88,30 @@ cat > /etc/dkms/framework.conf.d/usb-floppy-pi.conf <<'EOF'
 parallel_jobs=1
 EOF
 
-# Re-register source dir from this checkout (idempotent: remove stale entry).
+# Re-register source dir from this checkout (idempotent: remove stale
+# entry). Unload modules first — otherwise dkms remove can fail silently
+# with "module in use" and we'd hit "tree already contains" on add.
+rmmod g_floppy 2>/dev/null || true
+rmmod usb_f_floppy 2>/dev/null || true
+
 if dkms status -m "$DKMS_NAME" -v "$DKMS_VER" 2>/dev/null | grep -q .; then
-    dkms remove -m "$DKMS_NAME" -v "$DKMS_VER" --all 2>/dev/null || true
+    # Don't suppress stderr — surface real errors. If remove fails, fall
+    # back to nuking the /var/lib/dkms tree so we can rebuild from scratch.
+    dkms remove -m "$DKMS_NAME" -v "$DKMS_VER" --all || {
+        echo "    dkms remove failed; force-cleaning /var/lib/dkms/$DKMS_NAME"
+        rm -rf "/var/lib/dkms/$DKMS_NAME"
+    }
 fi
 rm -rf "/usr/src/${DKMS_NAME}-${DKMS_VER}"
 cp -r "$INSTALL_DIR/kernel" "/usr/src/${DKMS_NAME}-${DKMS_VER}"
-dkms add    -m "$DKMS_NAME" -v "$DKMS_VER"
-dkms build  -m "$DKMS_NAME" -v "$DKMS_VER"
-dkms install -m "$DKMS_NAME" -v "$DKMS_VER"
-echo "    DKMS installed g_floppy + usb_f_floppy for kernel $(uname -r)"
+dkms add -m "$DKMS_NAME" -v "$DKMS_VER"
+
+# autoinstall builds for ALL kernels that have headers installed — handy
+# after an apt kernel upgrade left the system with both old + new kernels
+# (DKMS rebuilds for the new one automatically next boot, but doing it
+# explicitly here avoids a surprise on first reboot post-upgrade).
+dkms autoinstall -m "$DKMS_NAME" -v "$DKMS_VER"
+echo "    DKMS installed g_floppy + usb_f_floppy for all available kernels"
 
 # === blank.img + current.img symlink =======================================
 # blank.img is a 1.44MB FAT12 image with label BLANK. It guarantees the
