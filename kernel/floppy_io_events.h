@@ -50,6 +50,15 @@ struct floppy_io_event_state {
 	 * is just total_blocks == 0. */
 	atomic64_t	track_crossings;
 	atomic_t	last_end_track;
+
+	/* Optional sysfs notification target — set via
+	 * floppy_io_event_set_notify_kobj() by g_floppy_main.c once the
+	 * class device exists. When non-NULL, record() calls
+	 * sysfs_notify(kobj, NULL, "track_crossings") whenever the counter
+	 * advances. The Python audio loop poll()s the attribute file with
+	 * POLLPRI so it can sleep at ~0% CPU until the kernel signals a
+	 * real seek event — replaces 50 Hz busy-polling. */
+	struct kobject	*notify_kobj;
 };
 
 void floppy_io_event_init(struct floppy_io_event_state *st);
@@ -68,5 +77,10 @@ u32  floppy_io_event_last_lba(struct floppy_io_event_state *st);
 bool floppy_io_event_last_is_write(struct floppy_io_event_state *st);
 u64  floppy_io_event_last_us(struct floppy_io_event_state *st);
 u64  floppy_io_event_track_crossings(struct floppy_io_event_state *st);
+
+/* Set / clear the sysfs notification target. Pass NULL to disable.
+ * Called from g_floppy_main.c after device_create_with_groups. */
+void floppy_io_event_set_notify_kobj(struct floppy_io_event_state *st,
+				     struct kobject *kobj);
 
 #endif /* FLOPPY_IO_EVENTS_H */

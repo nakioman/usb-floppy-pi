@@ -1,13 +1,22 @@
 """Sysfs reader for the kernel-side I/O event counters.
 
-Pairs with kernel/floppy_io_events.{c,h}. The kernel publishes four
+Pairs with kernel/floppy_io_events.{c,h}. The kernel publishes
 read-only attributes on /sys/class/usb_floppy/usb-floppy-pi/ that the
-buzzer state machine polls at ~50 Hz to decide whether the motor is
-running, whether a seek just happened, etc.
+buzzer state machine consumes:
+
+  - io_counter / last_io_lba / last_io_write / last_io_us  (general I/O)
+  - track_crossings                                        (seek events)
+
+Modern kernel modules also call ``sysfs_notify(kobj, NULL,
+"track_crossings")`` on every seek, so userspace can ``poll(POLLPRI)``
+the attribute file and sleep at ~0% CPU between events instead of
+busy-polling. ``open_notify_fd()`` returns a file descriptor primed for
+exactly that pattern.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,3 +61,23 @@ class SysfsIOEventReader:
             last_us=int((self._root / "last_io_us").read_text().strip()),
             track_crossings=int((self._root / "track_crossings").read_text().strip()),
         )
+
+    def open_notify_fd(self) -> int:
+        """Open ``track_crossings`` for ``poll(POLLPRI)`` event-driven use.
+
+        After the kernel calls ``sysfs_notify`` on the attribute, a
+        ``poll()`` registered with POLLPRI will wake — letting the
+        audio loop sleep at ~0% CPU between real seek events. The
+        caller is responsible for ``os.close()``-ing the returned fd.
+
+        Sysfs requires the FD to be "primed" once: read it once after
+        open so subsequent POLLPRI events represent fresh notifies
+        rather than the initial readable state.
+        """
+        fd = os.open(self._root / "track_crossings", os.O_RDONLY)
+        try:
+            os.read(fd, 32)  # prime — consume initial readable state
+        except OSError:
+            os.close(fd)
+            raise
+        return fd

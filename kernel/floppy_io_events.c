@@ -15,6 +15,8 @@
 #include <linux/module.h>
 #include <linux/atomic.h>
 #include <linux/ktime.h>
+#include <linux/sysfs.h>
+#include <linux/kobject.h>
 #include "floppy_io_events.h"
 
 static struct floppy_io_event_state *g_state;
@@ -27,10 +29,22 @@ void floppy_io_event_init(struct floppy_io_event_state *st)
 	atomic64_set(&st->last_us, 0);
 	atomic64_set(&st->track_crossings, 0);
 	atomic_set(&st->last_end_track, 0);
+	st->notify_kobj = NULL;
 	g_state = st;
 	pr_info("g_floppy: io_events tracker initialised\n");
 }
 EXPORT_SYMBOL_GPL(floppy_io_event_init);
+
+void floppy_io_event_set_notify_kobj(struct floppy_io_event_state *st,
+				     struct kobject *kobj)
+{
+	/* Plain pointer assignment is fine — notify_kobj is read by the
+	 * record() hot path (single producer, the gadget kthread) and
+	 * written here at most twice (once at register, once at unregister).
+	 * No concurrent writers. */
+	st->notify_kobj = kobj;
+}
+EXPORT_SYMBOL_GPL(floppy_io_event_set_notify_kobj);
 
 void floppy_io_event_exit(struct floppy_io_event_state *st)
 {
@@ -69,8 +83,17 @@ void floppy_io_event_record(struct floppy_io_event_state *st,
 				: (prev_end_track - start_track);
 	}
 
-	if (crossings > 0)
+	if (crossings > 0) {
 		atomic64_add(crossings, &st->track_crossings);
+		/* Wake up any userspace poll() waiting on the attribute file —
+		 * the Python audio service uses POLLPRI to sleep at ~0% CPU
+		 * until a real seek event happens. sysfs_notify does a string
+		 * compare to find the attribute, but that's O(small) compared
+		 * to the cost of doing nothing and forcing userspace to keep
+		 * polling 50 Hz. */
+		if (st->notify_kobj)
+			sysfs_notify(st->notify_kobj, NULL, "track_crossings");
+	}
 
 	atomic64_add(nblocks, &st->total_blocks);
 	atomic_set(&st->last_lba, (int)lba);

@@ -124,6 +124,12 @@ class FloppyStepDetector:
         self._last_activity_us: int = -10**9
         self._last_io_us: int = -10**9
 
+    def has_pending(self) -> bool:
+        """True iff there are clicks still waiting to drain. Used by the
+        audio loop to decide between "tick fast to drain" and "block on
+        the kernel notifier (long timeout)"."""
+        return self._pending > 0
+
     def tick(self, event: IOEvent, *, now_us: int) -> SoundCommand:
         # First observation: establish baseline. Don't fire any pre-existing
         # crossings/activity as sound — those represent I/O that happened

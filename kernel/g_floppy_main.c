@@ -296,12 +296,32 @@ static int usb_floppy_sysfs_register(void)
 		usb_floppy_class = NULL;
 		return err;
 	}
+
+	/* Plug the sysfs kobject into io_events so do_read/do_write can fire
+	 * sysfs_notify on track_crossings — lets userspace poll() POLLPRI
+	 * instead of busy-polling 50 Hz. Safe to call even if io_events
+	 * hasn't been init'd yet (it'll be reset on first fsg_alloc_inst). */
+	{
+		struct floppy_io_event_state *iost = floppy_io_event_get();
+		if (iost)
+			floppy_io_event_set_notify_kobj(iost,
+							&usb_floppy_dev->kobj);
+	}
+
 	pr_info("g_floppy: /sys/class/usb_floppy/usb-floppy-pi registered\n");
 	return 0;
 }
 
 static void usb_floppy_sysfs_unregister(void)
 {
+	/* Drop the kobj pointer before destroying the device so a racing
+	 * I/O notify doesn't dereference freed memory. */
+	{
+		struct floppy_io_event_state *iost = floppy_io_event_get();
+		if (iost)
+			floppy_io_event_set_notify_kobj(iost, NULL);
+	}
+
 	if (usb_floppy_dev) {
 		device_destroy(usb_floppy_class, MKDEV(0, 0));
 		usb_floppy_dev = NULL;
