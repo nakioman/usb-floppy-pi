@@ -8,15 +8,20 @@ Designed for a 2010-era PC running DOS / Win98 SE dual-boot, but works as a gene
 
 **Phase 1 — USB Mass Storage gadget (configfs):** ✅ shipped
 **Phase 2 — Custom kernel module + speed throttle + Floppy identity:** ✅ shipped
-**Phase 2.4 — Buzzer audio:** ⏳ deferred (separate sub-plan)
+**Phase 2.4 — Piezo buzzer audio (FlashFloppy-style):** ✅ shipped
 
 ✅ USB Mass Storage gadget — out-of-tree fork (`g_floppy`, `usb_f_floppy`)
    that always identifies as a 1.44 MB Floppy Disk Drive (Windows shows `A:`
    even with no media)
 ✅ Configurable speed throttle: `floppy-real` (~50 KB/s read, 30 KB/s
    write, 6 ms seek), `floppy-fast`, `unthrottled` — switchable from web UI
+✅ Piezo buzzer audio: brief stepper-motor clicks on every real seek
+   (kernel-side track-crossing counter + Python PWM driver),
+   FlashFloppy-style — silent at rest, distinct clicks during activity,
+   sequential "chunka-chunka" during multi-track seeks
 ✅ Web UI for browsing, mounting, ejecting, uploading + hardware controls
-   (speed preset, volume placeholder, buzzer placeholder)
+   (speed preset, volume slider, mute toggle, buzzer enable — all
+   hot-reload to the running service)
 ✅ Samba share for drag-and-drop image management from any machine on the LAN
 ✅ `.img`/`.ima`/`.imz` upload formats (auto-normalized to `.img`)
 ✅ Last-mounted image restored on boot; `blank.img` fallback on eject so
@@ -24,13 +29,17 @@ Designed for a 2010-era PC running DOS / Win98 SE dual-boot, but works as a gene
 ✅ Read-only and session mount modes
 ✅ DKMS-packaged kernel module — survives apt kernel upgrades
 
-⏳ LCD + physical buttons + buzzer audio — Phase 2.4 / Phase 3
+⏳ LCD + physical buttons — Phase 3
 
 ## Hardware
 
 - Raspberry Pi Zero 2W
 - microSD ≥ 8 GB
 - USB-A ↔ micro-USB **data** cable (not charge-only)
+- **Optional**: passive piezo buzzer module on GPIO 18 + 5V + GND for
+  floppy-style seek sounds (any 3.3-5V "passive buzzer" Arduino module
+  with built-in transistor buffer — e.g. EMAKERS, KY-006 etc.). Without
+  it the service still works fine, just silent.
 
 ## Install
 

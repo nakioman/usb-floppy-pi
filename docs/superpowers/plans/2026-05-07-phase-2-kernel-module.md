@@ -3336,6 +3336,66 @@ git commit -m "deploy(install): integrate DKMS install, Phase 1 cleanup, PWM ove
 
 ---
 
+## Phase 2.4 — Buzzer audio: implementation log (2026-05-13)
+
+Phase 2.4 was originally specced (Tasks 11-14 above) as a kernel-side
+HW PWM buzzer that synthesises sound from `do_read`/`do_write` inside
+`f_floppy.c`. We had to abandon that approach mid-execution.
+
+**The blocker:** `pwm_request(int, const char *)` was removed in kernel
+6.x in favour of the device-tree-bound `pwm_get(struct device *, const
+char *)`. A USB gadget function driver has no own device tree node, so
+neither API works for us — we'd have to register a fake platform device
+solely to acquire a PWM consumer, which is fragile and version-coupled.
+
+**What we did instead:** kept Task 11 (the `dtoverlay=pwm,pin=18,func=2`
+overlay), threw out Tasks 12-14, and rebuilt Phase 2.4 as a userspace
+audio stack driven by FlashFloppy-style track-step semantics:
+
+- **Kernel**: `kernel/floppy_io_events.{c,h}` — atomic counters fed from
+  `do_read`/`do_write`. A `track_crossings` counter increments by exactly
+  the number of 36-sector boundaries each request crosses (computed from
+  `lba + nblocks`, so it sees crossings *inside* a single multi-sector
+  request too). Exposed as 5 RO sysfs attrs on
+  `/sys/class/usb_floppy/usb-floppy-pi/`.
+- **Userspace** (`src/usb_floppy_pi/audio/`):
+  - `SysfsPWMBuzzer` drives `/sys/class/pwm/pwmchip0/pwm0/` (period/
+    duty_cycle/enable), with `volume`/`mute`/`enabled` gating.
+  - `SysfsIOEventReader` reads the kernel counters into an `IOEvent`
+    snapshot.
+  - `FloppyStepDetector` queues one pending click per
+    `track_crossings` delta, drains at most one per tick (50 Hz),
+    subject to a 2.7 ms mask matching FlashFloppy's minimum step cycle
+    (`src/gotek/speaker.c`).
+  - `SoundRenderer` plays each click as a 0.5 ms pulse at 2 kHz
+    (≈one cycle at the EMAKERS piezo's resonance) — pure transient,
+    not tonal. Long seeks render as "chunka-chunka-chunka".
+- **Web API**: `/api/{volume,mute,buzzer}` hot-reload the live buzzer
+  and persist to `config.json`. No restart needed.
+
+**Hardware**: passive piezo buzzer module (with built-in transistor
+buffer, sold as "Arduino passive buzzer module") wired to GPIO 18 +
+5V + GND. We tried two active buzzers first that didn't work — see
+the README for how to tell active vs passive at purchase time.
+
+**Tuning history** (decisions worth preserving):
+- The active buzzers we initially had (single 2300 Hz emission) made
+  beep-beep only — couldn't follow PWM frequency changes.
+- 1.2 kHz sustained tones for motor whir sounded synthy, not floppy-like.
+- A continuous click stream sounded constant rather than mechanical.
+- The breakthrough was reading FlashFloppy's `speaker.c`: clicks are
+  *transient pulses* of a fraction of a millisecond, NOT tones. One
+  pulse per real stepper step, silent between.
+- LBA-only polling (early version) missed crossings inside multi-sector
+  reads. Adding `track_crossings` kernel-side fixed it.
+
+**Status**: ✅ shipped. 19 new tests (sysfs_pwm_buzzer 7, io_event_reader
+2, state_machine 6, sound_renderer 5, audio_loop 2; plus 3 API
+hot-reload + 4 wire-up in web). Full suite 133 passed. DKMS-installed
+on Pi, survives reboot, auto-loads on boot.
+
+---
+
 ## Phase 2.7 — Deployment validation log (2026-05-08)
 
 End-to-end install validated on Pi Zero 2W (kernel `6.12.75+rpt-rpi-v8`):
