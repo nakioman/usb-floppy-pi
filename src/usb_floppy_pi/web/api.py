@@ -88,6 +88,37 @@ def build_app(
                 return d
         raise HTTPException(status_code=404, detail=f"disk not found: {filename}")
 
+    def _audio_metric(name: str):
+        if audio_buzzer is None:
+            return None
+        return getattr(audio_buzzer, name, None)
+
+    def _metrics_with_audio_state(metrics: dict) -> dict:
+        if audio_buzzer is None:
+            return metrics
+        return metrics | {
+            "audio_buzzer": True,
+            "volume": _audio_metric("volume"),
+            "mute": _audio_metric("mute"),
+            "buzzer": _audio_metric("enabled"),
+        }
+
+    def _hot_reload_audio(method: str, value) -> None:
+        if audio_buzzer is None:
+            return
+        try:
+            getattr(audio_buzzer, method)(value)
+        except OSError as exc:
+            logger.warning("audio hot-reload %s=%r failed: %s", method, value, exc)
+
+    def _persist_audio_change(field: str, value) -> None:
+        if on_audio_change is None:
+            return
+        try:
+            on_audio_change(field, value)
+        except OSError as exc:
+            logger.warning("could not persist audio change %s=%r: %s", field, value, exc)
+
     @app.get("/api/sets")
     def get_sets() -> dict:
         return {
@@ -109,6 +140,7 @@ def build_app(
         except Exception as exc:
             logger.debug("get_metrics failed (%s); returning empty", exc)
             metrics = {}
+        metrics = _metrics_with_audio_state(metrics)
         return {
             "mounted": (
                 asdict(m)
@@ -162,10 +194,8 @@ def build_app(
             controller.backend.set_volume(req.volume)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        if audio_buzzer is not None:
-            audio_buzzer.set_volume(req.volume)
-        if on_audio_change is not None:
-            on_audio_change("volume", req.volume)
+        _hot_reload_audio("set_volume", req.volume)
+        _persist_audio_change("volume", req.volume)
         return {"volume": req.volume}
 
     @app.post("/api/mute")
@@ -174,10 +204,8 @@ def build_app(
             controller.backend.set_mute(req.mute)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        if audio_buzzer is not None:
-            audio_buzzer.set_mute(req.mute)
-        if on_audio_change is not None:
-            on_audio_change("mute", req.mute)
+        _hot_reload_audio("set_mute", req.mute)
+        _persist_audio_change("mute", req.mute)
         return {"mute": req.mute}
 
     @app.post("/api/buzzer")
@@ -186,10 +214,8 @@ def build_app(
             controller.backend.set_buzzer_enabled(req.enabled)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        if audio_buzzer is not None:
-            audio_buzzer.set_enabled(req.enabled)
-        if on_audio_change is not None:
-            on_audio_change("buzzer_enabled", req.enabled)
+        _hot_reload_audio("set_enabled", req.enabled)
+        _persist_audio_change("buzzer_enabled", req.enabled)
         return {"enabled": req.enabled}
 
     @app.post("/api/sets/{set_name}/readonly")

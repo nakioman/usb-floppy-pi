@@ -22,9 +22,9 @@ class FakeBuzzer:
         self.calls: list[tuple] = []
         self.silenced = True
 
-    def play_tone(self, freq_hz: int) -> None:
+    def play_tone(self, freq_hz: int, *, volume_scale: float = 1.0) -> None:
         self.silenced = False
-        self.calls.append(("play_tone", freq_hz))
+        self.calls.append(("play_tone", freq_hz, volume_scale))
 
     def silence(self) -> None:
         self.silenced = True
@@ -76,9 +76,10 @@ def test_loop_clicks_on_each_new_crossing(fake_sysfs: Path) -> None:
     # Crossings jump to 1 → one click rendered.
     _set_crossings(fake_sysfs, 1)
     loop.tick(now_us=20_000)
-    assert ("play_tone", 2000) in buzzer.calls
     play_tone_count = sum(1 for c in buzzer.calls if c[0] == "play_tone")
     assert play_tone_count == 1
+    freq = next(c[1] for c in buzzer.calls if c[0] == "play_tone")
+    assert 1300 <= freq <= 1900
 
     # Still at crossings=1 → no further clicks.
     loop.tick(now_us=40_000)

@@ -57,7 +57,19 @@ class SysfsPWMBuzzer:
         if not enabled:
             self.silence()
 
-    def play_tone(self, freq_hz: int) -> None:
+    @property
+    def volume(self) -> int:
+        return self._volume
+
+    @property
+    def mute(self) -> bool:
+        return self._mute
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def play_tone(self, freq_hz: int, *, volume_scale: float = 1.0) -> None:
         """Drive the piezo at ``freq_hz`` scaled by current volume.
 
         At volume=100 the duty cycle is 50% (loudest — maximum spectral
@@ -68,13 +80,14 @@ class SysfsPWMBuzzer:
         AND mute=False) for the tone to play, mimicking the two-toggle
         UX in the web UI.
         """
-        if self._mute or not self._enabled or self._volume == 0:
+        effective_volume = max(0.0, min(1.0, volume_scale)) * self._volume
+        if self._mute or not self._enabled or effective_volume <= 0:
             self.silence()
             return
 
         period_ns = 1_000_000_000 // freq_hz
         # volume=100 → duty = period/2 (50%); volume=v → duty = period*v/200.
-        duty_ns = (period_ns * self._volume) // 200
+        duty_ns = min(period_ns, int((period_ns * effective_volume) // 200))
 
         # The kernel requires duty <= period at all times. When lowering
         # frequency (longer period) we'd briefly violate that if we wrote

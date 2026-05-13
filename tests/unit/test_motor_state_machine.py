@@ -1,9 +1,4 @@
-"""Unit tests for FloppyStepDetector.
-
-Reads ``IOEvent.track_crossings`` (kernel-side counter that increments
-once per real seek), enqueues one pending click per delta, drains them
-one per tick subject to a 2.7 ms mask. Pure logic — no I/O.
-"""
+"""Unit tests for FloppyStepDetector."""
 
 from __future__ import annotations
 
@@ -47,59 +42,71 @@ def test_single_crossing_fires_one_click() -> None:
 
     cmd = det.tick(_evt(crossings=1), now_us=20_000)
 
-    assert cmd == SoundCommand.step_click()
+    assert cmd.kind == "seek_burst"
+    assert cmd.clicks == 1
+    assert cmd.spacing_us == 6000
 
 
-def test_multi_track_seek_drains_clicks_across_ticks() -> None:
-    """5 crossings in one tick → 5 clicks spread over 5 successive ticks."""
+def test_multi_track_seek_returns_one_burst() -> None:
+    """5 crossings in one tick become one burst with real seek spacing."""
     det = FloppyStepDetector()
     det.tick(_evt(crossings=0), now_us=0)
 
-    # Mass crossing event (e.g., long seek).
-    cmds = [det.tick(_evt(crossings=5), now_us=20_000)]
-    # Subsequent ticks have no new crossings but should drain the queue.
-    for i in range(2, 7):
-        cmds.append(det.tick(_evt(crossings=5), now_us=20_000 + i * 20_000))
+    cmd = det.tick(_evt(crossings=5), now_us=20_000)
 
-    # First 5 ticks drain the queue → step_click each.
-    assert cmds[0] == SoundCommand.step_click()
-    assert cmds[1] == SoundCommand.step_click()
-    assert cmds[2] == SoundCommand.step_click()
-    assert cmds[3] == SoundCommand.step_click()
-    assert cmds[4] == SoundCommand.step_click()
-    # Queue drained — last tick is silent.
-    assert cmds[5] == SoundCommand.silence()
+    assert cmd.kind == "seek_burst"
+    assert cmd.clicks == 5
+    assert cmd.spacing_us == 6000
+    assert det.tick(_evt(crossings=5), now_us=40_000) == SoundCommand.silence()
 
 
-def test_click_mask_suppresses_too_fast_clicks() -> None:
-    """Even with pending clicks, the mask enforces minimum spacing — fits
-    real-floppy step cadence."""
+def test_click_mask_clamps_burst_spacing() -> None:
     det = FloppyStepDetector(click_mask_us=2700)
     det.tick(_evt(crossings=0), now_us=0)
 
-    cmd1 = det.tick(_evt(crossings=2), now_us=10_000)   # fires
-    cmd2 = det.tick(_evt(crossings=2), now_us=11_000)   # masked (1ms after)
-    cmd3 = det.tick(_evt(crossings=2), now_us=14_000)   # fires (4ms after)
+    cmd = det.tick(_evt(crossings=2), now_us=10_000)
 
-    assert cmd1 == SoundCommand.step_click()
-    assert cmd2 == SoundCommand.silence()
-    assert cmd3 == SoundCommand.step_click()
+    assert cmd.kind == "seek_burst"
+    assert cmd.spacing_us >= 2700
 
 
-def test_pending_clicks_capped_to_avoid_runaway() -> None:
+def test_burst_clicks_capped_to_avoid_runaway() -> None:
     """A flood of crossings (e.g., directory scan crossing 100 tracks)
-    shouldn't keep clicking for seconds afterward. Cap = max_pending."""
+    shouldn't render a huge blocking burst."""
     det = FloppyStepDetector(max_pending_clicks=3)
     det.tick(_evt(crossings=0), now_us=0)
 
-    # 100 crossings arrive in one tick.
-    det.tick(_evt(crossings=100), now_us=20_000)
+    cmd = det.tick(_evt(crossings=100), now_us=20_000)
 
-    # Now drain — only `max_pending_clicks` should come out total.
-    click_count = 1  # the one we just fired
-    for i in range(2, 20):
-        cmd = det.tick(_evt(crossings=100), now_us=20_000 + i * 20_000)
-        if cmd == SoundCommand.step_click():
-            click_count += 1
+    assert cmd.kind == "seek_burst"
+    assert cmd.clicks == 3
 
-    assert click_count == 3
+
+def test_counter_delta_without_seek_after_idle_emits_motor_spin() -> None:
+    det = FloppyStepDetector(activity_interval_us=80_000)
+    det.tick(_evt(crossings=0, counter=0), now_us=0)
+
+    cmd = det.tick(_evt(crossings=0, counter=1), now_us=80_000)
+
+    assert cmd.kind == "motor_spin"
+    assert cmd.clicks == 3
+    assert cmd.spacing_us == 5000
+
+
+def test_activity_ticks_are_bounded_and_stop_when_idle() -> None:
+    det = FloppyStepDetector(activity_interval_us=80_000)
+    det.tick(_evt(crossings=0, counter=0), now_us=0)
+
+    assert det.tick(_evt(crossings=0, counter=1), now_us=10_000).kind == "motor_spin"
+    assert det.tick(_evt(crossings=0, counter=2), now_us=20_000) == SoundCommand.silence()
+    assert det.tick(_evt(crossings=0, counter=2), now_us=120_000) == SoundCommand.silence()
+
+
+def test_sustained_same_track_io_emits_bounded_activity_tick() -> None:
+    det = FloppyStepDetector(activity_interval_us=80_000)
+    det.tick(_evt(crossings=0, counter=0), now_us=0)
+    det.tick(_evt(crossings=0, counter=1), now_us=10_000)  # motor spin
+
+    cmd = det.tick(_evt(crossings=0, counter=2), now_us=100_000)
+
+    assert cmd == SoundCommand.activity_tick(jitter_seed=(100_000 ^ 2 ^ 0) & 0xFFFF)

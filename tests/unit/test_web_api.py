@@ -375,15 +375,26 @@ class _FakeAudioBuzzer:
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.volume = 70
+        self.mute = False
+        self.enabled = True
 
     def set_volume(self, volume: int) -> None:
+        self.volume = volume
         self.calls.append(("set_volume", volume))
 
     def set_mute(self, mute: bool) -> None:
+        self.mute = mute
         self.calls.append(("set_mute", mute))
 
     def set_enabled(self, enabled: bool) -> None:
+        self.enabled = enabled
         self.calls.append(("set_enabled", enabled))
+
+
+class _FailingAudioBuzzer(_FakeAudioBuzzer):
+    def set_volume(self, volume: int) -> None:
+        raise OSError("pwm temporarily unavailable")
 
 
 @pytest.fixture
@@ -446,6 +457,54 @@ def test_post_buzzer_hot_reloads_audio_buzzer(app_with_audio) -> None:
 
     assert ("set_enabled", False) in buzzer.calls
     assert ("buzzer_enabled", False) in changes
+
+
+def test_get_state_includes_userspace_audio_metrics(app_with_audio) -> None:
+    app, buzzer, _ = app_with_audio
+    buzzer.volume = 42
+    buzzer.mute = True
+    buzzer.enabled = False
+
+    with TestClient(app) as client:
+        r = client.get("/api/state")
+
+    assert r.status_code == 200
+    metrics = r.json()["metrics"]
+    assert metrics["audio_buzzer"] is True
+    assert metrics["volume"] == 42
+    assert metrics["mute"] is True
+    assert metrics["buzzer"] is False
+
+
+def test_audio_hot_reload_failure_is_nonfatal_and_persists(tmp_path: Path) -> None:
+    dos = tmp_path / "DOS 6.22"
+    dos.mkdir()
+    (dos / "DISK001.img").write_bytes(b"\x00" * 1474560)
+
+    loop = asyncio.new_event_loop()
+    library = Library(tmp_path, loop=loop)
+    loop.run_until_complete(library.start())
+    backend = MockBackend()
+    controller = GadgetController(backend, _params())
+    loop.run_until_complete(controller.initialize())
+
+    changes: list[tuple] = []
+    app = build_app(
+        library=library,
+        controller=controller,
+        floppy_root=tmp_path,
+        audio_buzzer=_FailingAudioBuzzer(),
+        on_audio_change=lambda field, value: changes.append((field, value)),
+    )
+    try:
+        with TestClient(app) as client:
+            r = client.post("/api/volume", json={"volume": 33})
+        assert r.status_code == 200
+        assert r.json() == {"volume": 33}
+        assert ("volume", 33) in changes
+    finally:
+        loop.run_until_complete(library.stop())
+        loop.close()
 
 
 def test_get_state_includes_metrics(app_with_data) -> None:

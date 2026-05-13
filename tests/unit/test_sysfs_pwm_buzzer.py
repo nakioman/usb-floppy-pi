@@ -71,6 +71,17 @@ def test_volume_scales_duty_cycle_linearly(fake_pwmchip: Path) -> None:
     assert duty_half == period // 4
 
 
+def test_volume_scale_temporarily_reduces_duty_cycle(fake_pwmchip: Path) -> None:
+    buzzer = SysfsPWMBuzzer(pwmchip_path=fake_pwmchip, volume=100)
+
+    buzzer.play_tone(1000, volume_scale=0.25)
+
+    period = int((fake_pwmchip / "pwm0" / "period").read_text().strip())
+    duty = int((fake_pwmchip / "pwm0" / "duty_cycle").read_text().strip())
+    assert duty == period // 8
+    assert buzzer.volume == 100
+
+
 def test_volume_zero_keeps_output_silent(fake_pwmchip: Path) -> None:
     buzzer = SysfsPWMBuzzer(pwmchip_path=fake_pwmchip, volume=0)
     buzzer.play_tone(1000)

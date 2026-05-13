@@ -48,7 +48,14 @@ class AudioLoop:
         """
         try:
             while True:
-                self.tick(now_us=time.monotonic_ns() // 1000)
+                try:
+                    self.tick(now_us=time.monotonic_ns() // 1000)
+                except Exception as exc:
+                    logger.warning("audio tick failed; retrying after %.3fs: %s", interval_s, exc)
+                    try:
+                        self._renderer.render(SoundCommand.silence())
+                    except Exception:
+                        logger.debug("audio silence after failure also failed", exc_info=True)
                 await asyncio.sleep(interval_s)
         except asyncio.CancelledError:
             # Make sure the buzzer is left silent on shutdown — otherwise
