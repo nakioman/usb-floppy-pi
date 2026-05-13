@@ -105,3 +105,11 @@ change vs upstream.)
   chain, and `modprobe g_floppy file=...` works system-wide without
   absolute paths. Survives reboot — the .ko stays installed, just needs
   /etc/modules-load.d entry to auto-load (Phase 2.7 work).
+- 2026-05-12: Added kernel/floppy_io_events.{c,h} — atomic counters for
+  the userspace buzzer (Phase 2.4 architecture pivot: kernel-side
+  pwm_request() was removed in 6.x without a clean replacement for non-DT
+  drivers, so we publish I/O activity via sysfs and let the Python service
+  drive the piezo). Hooks in do_read/do_write call floppy_io_event_record
+  right after the throttle hooks (atomics only, no locks). State shares
+  the throttle's refcount/mutex for init/exit. g_floppy_main.c exposes 4
+  new read-only attrs: io_counter, last_io_lba, last_io_write, last_io_us.

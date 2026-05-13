@@ -9,7 +9,8 @@
 
 obj-m := usb_f_floppy.o g_floppy.o
 
-usb_f_floppy-y := f_floppy.o storage_common.o floppy_throttle.o
+usb_f_floppy-y := f_floppy.o storage_common.o floppy_throttle.o \
+                  floppy_io_events.o
 g_floppy-y     := g_floppy_main.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build

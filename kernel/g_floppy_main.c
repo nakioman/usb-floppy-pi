@@ -31,6 +31,7 @@
 #include <linux/sysfs.h>
 #include "storage_common.h"
 #include "floppy_throttle.h"
+#include "floppy_io_events.h"
 
 /*-------------------------------------------------------------------------*/
 
@@ -198,6 +199,47 @@ static ssize_t seek_us_show(struct device *d,
 }
 static DEVICE_ATTR_RO(seek_us);
 
+/* I/O event tracking (Phase 2.4): cheap atomic counters fed from do_read /
+ * do_write in f_floppy.c. Polled by the userspace audio service to drive
+ * the piezo buzzer (motor on/off, seek clicks). All read-only — the only
+ * writer is the gadget I/O kthread. */
+
+static ssize_t io_counter_show(struct device *d, struct device_attribute *a,
+			       char *buf)
+{
+	struct floppy_io_event_state *st = floppy_io_event_get();
+	return scnprintf(buf, PAGE_SIZE, "%llu\n",
+			 st ? floppy_io_event_total_blocks(st) : 0ULL);
+}
+static DEVICE_ATTR_RO(io_counter);
+
+static ssize_t last_io_lba_show(struct device *d, struct device_attribute *a,
+				 char *buf)
+{
+	struct floppy_io_event_state *st = floppy_io_event_get();
+	return scnprintf(buf, PAGE_SIZE, "%u\n",
+			 st ? floppy_io_event_last_lba(st) : 0u);
+}
+static DEVICE_ATTR_RO(last_io_lba);
+
+static ssize_t last_io_write_show(struct device *d, struct device_attribute *a,
+				   char *buf)
+{
+	struct floppy_io_event_state *st = floppy_io_event_get();
+	return scnprintf(buf, PAGE_SIZE, "%d\n",
+			 st && floppy_io_event_last_is_write(st) ? 1 : 0);
+}
+static DEVICE_ATTR_RO(last_io_write);
+
+static ssize_t last_io_us_show(struct device *d, struct device_attribute *a,
+				char *buf)
+{
+	struct floppy_io_event_state *st = floppy_io_event_get();
+	return scnprintf(buf, PAGE_SIZE, "%llu\n",
+			 st ? floppy_io_event_last_us(st) : 0ULL);
+}
+static DEVICE_ATTR_RO(last_io_us);
+
 static struct attribute *usb_floppy_attrs[] = {
 	&dev_attr_lun0_file.attr,
 	&dev_attr_lun0_ro.attr,
@@ -206,6 +248,10 @@ static struct attribute *usb_floppy_attrs[] = {
 	&dev_attr_speed_read_kbps.attr,
 	&dev_attr_speed_write_kbps.attr,
 	&dev_attr_seek_us.attr,
+	&dev_attr_io_counter.attr,
+	&dev_attr_last_io_lba.attr,
+	&dev_attr_last_io_write.attr,
+	&dev_attr_last_io_us.attr,
 	NULL,
 };
 

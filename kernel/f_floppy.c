@@ -209,6 +209,7 @@ static const char fsg_string_interface[] = "USB Floppy";
 #include "storage_common.h"
 #include "f_floppy.h"
 #include "floppy_throttle.h"
+#include "floppy_io_events.h"
 
 /* usb-floppy-pi: throttle state owned by usb_f_floppy.ko, initialised at the
  * first fsg_alloc_inst() call and torn down at the last fsg_free_inst().
@@ -217,6 +218,11 @@ static const char fsg_string_interface[] = "USB Floppy";
 static struct floppy_throttle_state floppy_throttle;
 static int floppy_throttle_refcnt;
 static DEFINE_MUTEX(floppy_throttle_lock);
+
+/* usb-floppy-pi: I/O event tracker — same lifecycle as the throttle (one
+ * instance per module, refcounted with the same mutex). Read-only-ish from
+ * userspace via the sysfs class in g_floppy_main.c. */
+static struct floppy_io_event_state floppy_io_events;
 
 /* === usb-floppy-pi additions: configurable interface subclass ===
  * The upstream f_mass_storage hardcodes bInterfaceSubClass = USB_SC_SCSI in
@@ -710,6 +716,14 @@ static int do_read(struct fsg_common *common)
 		(u32)lba,
 		(u32)(common->data_size_from_cmnd >> curlun->blkbits));
 
+	/* usb-floppy-pi: publish this I/O for the userspace buzzer. Atomics
+	 * only — the Python audio service polls /sys/class/usb_floppy/...
+	 * at ~50 Hz to drive the piezo. */
+	floppy_io_event_record(floppy_io_event_get(),
+		(u32)lba,
+		(u32)(common->data_size_from_cmnd >> curlun->blkbits),
+		false);
+
 	/* Carry out the file reads */
 	amount_left = common->data_size_from_cmnd;
 	if (unlikely(amount_left == 0))
@@ -861,6 +875,13 @@ static int do_write(struct fsg_common *common)
 	floppy_throttle_on_write(floppy_throttle_get(),
 		(u32)lba,
 		(u32)(common->data_size_from_cmnd >> curlun->blkbits));
+
+	/* usb-floppy-pi: publish this write event for the userspace buzzer
+	 * (see do_read for the symmetric read hook). */
+	floppy_io_event_record(floppy_io_event_get(),
+		(u32)lba,
+		(u32)(common->data_size_from_cmnd >> curlun->blkbits),
+		true);
 
 	/* Carry out the file writes */
 	get_some_more = 1;
@@ -3610,10 +3631,13 @@ static void fsg_free_inst(struct usb_function_instance *fi)
 	fsg_common_release(opts->common);
 	kfree(opts);
 
-	/* usb-floppy-pi: tear down throttle when the last instance goes away. */
+	/* usb-floppy-pi: tear down throttle + io_events when the last
+	 * instance goes away. Both share the throttle refcount/mutex —
+	 * they have identical lifecycle (one per module). */
 	mutex_lock(&floppy_throttle_lock);
 	if (--floppy_throttle_refcnt <= 0) {
 		floppy_throttle_exit(&floppy_throttle);
+		floppy_io_event_exit(&floppy_io_events);
 		floppy_throttle_refcnt = 0;
 	}
 	mutex_unlock(&floppy_throttle_lock);
@@ -3636,10 +3660,12 @@ static struct usb_function_instance *fsg_alloc_inst(void)
 		goto release_opts;
 	}
 
-	/* usb-floppy-pi: initialise throttle on first use. */
+	/* usb-floppy-pi: initialise throttle + io_events on first use. */
 	mutex_lock(&floppy_throttle_lock);
-	if (floppy_throttle_refcnt++ == 0)
+	if (floppy_throttle_refcnt++ == 0) {
 		floppy_throttle_init(&floppy_throttle);
+		floppy_io_event_init(&floppy_io_events);
+	}
 	mutex_unlock(&floppy_throttle_lock);
 
 	rc = fsg_common_set_num_buffers(opts->common,
