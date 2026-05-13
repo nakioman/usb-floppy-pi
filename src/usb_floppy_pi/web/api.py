@@ -60,8 +60,18 @@ def build_app(
     library: Library,
     controller: GadgetController,
     floppy_root: Path,
+    audio_buzzer: object | None = None,
+    on_audio_change: object | None = None,
 ) -> FastAPI:
-    """Build the FastAPI app, with all dependencies injected."""
+    """Build the FastAPI app, with all dependencies injected.
+
+    Phase 2.4 hot-reload: ``audio_buzzer`` is an optional
+    ``SysfsPWMBuzzer``-shaped object (any duck with set_volume/set_mute/
+    set_enabled) the volume/mute/buzzer endpoints will drive in addition
+    to ``controller.backend``. ``on_audio_change(field, value)`` is a
+    callback fired on each successful change so the caller can persist
+    to config — both kwargs are optional and ignored if None.
+    """
     app = FastAPI(title="USB Floppy Pi")
 
     static_dir = Path(__file__).parent / "static"
@@ -152,6 +162,10 @@ def build_app(
             controller.backend.set_volume(req.volume)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if audio_buzzer is not None:
+            audio_buzzer.set_volume(req.volume)
+        if on_audio_change is not None:
+            on_audio_change("volume", req.volume)
         return {"volume": req.volume}
 
     @app.post("/api/mute")
@@ -160,6 +174,10 @@ def build_app(
             controller.backend.set_mute(req.mute)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if audio_buzzer is not None:
+            audio_buzzer.set_mute(req.mute)
+        if on_audio_change is not None:
+            on_audio_change("mute", req.mute)
         return {"mute": req.mute}
 
     @app.post("/api/buzzer")
@@ -168,6 +186,10 @@ def build_app(
             controller.backend.set_buzzer_enabled(req.enabled)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if audio_buzzer is not None:
+            audio_buzzer.set_enabled(req.enabled)
+        if on_audio_change is not None:
+            on_audio_change("buzzer_enabled", req.enabled)
         return {"enabled": req.enabled}
 
     @app.post("/api/sets/{set_name}/readonly")

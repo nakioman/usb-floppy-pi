@@ -76,3 +76,48 @@ def test_volume_zero_keeps_output_silent(fake_pwmchip: Path) -> None:
     buzzer.play_tone(1000)
     # At zero volume, duty_cycle is 0 AND enable is 0 — no current draw.
     assert (fake_pwmchip / "pwm0" / "enable").read_text().strip() == "0"
+
+
+def test_mute_silences_play_tone_without_losing_volume(fake_pwmchip: Path) -> None:
+    """set_mute(True) gates play_tone to silence without changing volume.
+    Unmuting restores playback at the same volume."""
+    buzzer = SysfsPWMBuzzer(pwmchip_path=fake_pwmchip, volume=80)
+
+    buzzer.set_mute(True)
+    buzzer.play_tone(1000)
+    assert (fake_pwmchip / "pwm0" / "enable").read_text().strip() == "0"
+
+    buzzer.set_mute(False)
+    buzzer.play_tone(1000)
+    assert (fake_pwmchip / "pwm0" / "enable").read_text().strip() == "1"
+
+
+def test_disabled_silences_play_tone(fake_pwmchip: Path) -> None:
+    """set_enabled(False) silences regardless of mute or volume."""
+    buzzer = SysfsPWMBuzzer(pwmchip_path=fake_pwmchip, volume=100)
+
+    buzzer.set_enabled(False)
+    buzzer.play_tone(1000)
+
+    assert (fake_pwmchip / "pwm0" / "enable").read_text().strip() == "0"
+
+
+def test_enabled_and_unmuted_required_for_playback(fake_pwmchip: Path) -> None:
+    """Both flags must be ON for play_tone to actually drive the piezo —
+    matches the UX: mute toggle and buzzer toggle are independent in the
+    web UI, either being off should silence everything."""
+    buzzer = SysfsPWMBuzzer(pwmchip_path=fake_pwmchip, volume=100)
+    buzzer.set_enabled(False)
+    buzzer.set_mute(False)
+    buzzer.play_tone(1000)
+    assert (fake_pwmchip / "pwm0" / "enable").read_text().strip() == "0"
+
+    buzzer.set_enabled(True)
+    buzzer.set_mute(True)
+    buzzer.play_tone(1000)
+    assert (fake_pwmchip / "pwm0" / "enable").read_text().strip() == "0"
+
+    buzzer.set_enabled(True)
+    buzzer.set_mute(False)
+    buzzer.play_tone(1000)
+    assert (fake_pwmchip / "pwm0" / "enable").read_text().strip() == "1"

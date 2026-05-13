@@ -368,6 +368,86 @@ def test_post_buzzer(app_with_data) -> None:
         assert "set_buzzer_enabled(False)" in backend.ops_log
 
 
+# --- Phase 2.4 hot-reload: audio_buzzer + on_audio_change wire-up ---------
+
+class _FakeAudioBuzzer:
+    """Records hot-reload calls without driving real PWM hardware."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def set_volume(self, volume: int) -> None:
+        self.calls.append(("set_volume", volume))
+
+    def set_mute(self, mute: bool) -> None:
+        self.calls.append(("set_mute", mute))
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.calls.append(("set_enabled", enabled))
+
+
+@pytest.fixture
+def app_with_audio(tmp_path: Path):
+    """Like app_with_data but with a fake audio buzzer + change recorder."""
+    dos = tmp_path / "DOS 6.22"
+    dos.mkdir()
+    (dos / "DISK001.img").write_bytes(b"\x00" * 1474560)
+
+    loop = asyncio.new_event_loop()
+    library = Library(tmp_path, loop=loop)
+    loop.run_until_complete(library.start())
+    backend = MockBackend()
+    controller = GadgetController(backend, _params())
+    loop.run_until_complete(controller.initialize())
+
+    buzzer = _FakeAudioBuzzer()
+    changes: list[tuple] = []
+
+    def on_change(field: str, value) -> None:
+        changes.append((field, value))
+
+    app = build_app(
+        library=library,
+        controller=controller,
+        floppy_root=tmp_path,
+        audio_buzzer=buzzer,
+        on_audio_change=on_change,
+    )
+    yield app, buzzer, changes
+    loop.run_until_complete(library.stop())
+    loop.close()
+
+
+def test_post_volume_hot_reloads_audio_buzzer(app_with_audio) -> None:
+    app, buzzer, changes = app_with_audio
+    with TestClient(app) as client:
+        r = client.post("/api/volume", json={"volume": 55})
+        assert r.status_code == 200
+
+    assert ("set_volume", 55) in buzzer.calls
+    assert ("volume", 55) in changes
+
+
+def test_post_mute_hot_reloads_audio_buzzer(app_with_audio) -> None:
+    app, buzzer, changes = app_with_audio
+    with TestClient(app) as client:
+        r = client.post("/api/mute", json={"mute": True})
+        assert r.status_code == 200
+
+    assert ("set_mute", True) in buzzer.calls
+    assert ("mute", True) in changes
+
+
+def test_post_buzzer_hot_reloads_audio_buzzer(app_with_audio) -> None:
+    app, buzzer, changes = app_with_audio
+    with TestClient(app) as client:
+        r = client.post("/api/buzzer", json={"enabled": False})
+        assert r.status_code == 200
+
+    assert ("set_enabled", False) in buzzer.calls
+    assert ("buzzer_enabled", False) in changes
+
+
 def test_get_state_includes_metrics(app_with_data) -> None:
     app, _, _, _ = app_with_data
     with TestClient(app) as client:

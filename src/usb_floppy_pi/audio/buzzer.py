@@ -29,14 +29,33 @@ class SysfsPWMBuzzer:
         *,
         pwmchip_path: Path = Path("/sys/class/pwm/pwmchip0"),
         volume: int = 100,
+        mute: bool = False,
+        enabled: bool = True,
     ) -> None:
         self._chip = Path(pwmchip_path)
         self._pwm = self._chip / "pwm0"
         self._volume = max(0, min(100, volume))
+        self._mute = mute
+        self._enabled = enabled
 
     def set_volume(self, volume: int) -> None:
         """Set output volume 0..100. Takes effect on the next play_tone."""
         self._volume = max(0, min(100, volume))
+
+    def set_mute(self, mute: bool) -> None:
+        """When muted, play_tone silences immediately. Volume is preserved
+        for restoration when unmuted."""
+        self._mute = mute
+        if mute:
+            self.silence()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Master enable/disable. Distinct from mute so the web UI can have
+        two independent controls (some users want mute as a temporary
+        toggle and enabled as a "buzzer feature on/off")."""
+        self._enabled = enabled
+        if not enabled:
+            self.silence()
 
     def play_tone(self, freq_hz: int) -> None:
         """Drive the piezo at ``freq_hz`` scaled by current volume.
@@ -44,8 +63,12 @@ class SysfsPWMBuzzer:
         At volume=100 the duty cycle is 50% (loudest — maximum spectral
         energy at the fundamental for a piezo). Volume scales linearly
         down to 0% duty at volume=0, which is equivalent to silence.
+
+        Mute and enabled flags gate output: both must be ON (enabled=True
+        AND mute=False) for the tone to play, mimicking the two-toggle
+        UX in the web UI.
         """
-        if self._volume == 0:
+        if self._mute or not self._enabled or self._volume == 0:
             self.silence()
             return
 

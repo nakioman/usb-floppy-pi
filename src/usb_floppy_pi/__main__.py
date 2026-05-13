@@ -38,6 +38,8 @@ class Runtime:
     library: Library
     controller: GadgetController
     app: object  # FastAPI
+    audio_loop: AudioLoop | None = None
+    audio_buzzer: SysfsPWMBuzzer | None = None
 
     async def shutdown(self) -> None:
         await self.controller.shutdown()
@@ -170,7 +172,38 @@ async def build_runtime(
     controller.mount = _mount  # type: ignore[method-assign]
     controller.eject = _eject  # type: ignore[method-assign]
 
-    app = build_app(library=library, controller=controller, floppy_root=floppy_root)
+    # Phase 2.4: build the audio buzzer (None on dev boxes without
+    # /sys/class/pwm or /sys/class/usb_floppy). Volume/mute/enabled from
+    # config so the buzzer respects persisted user preferences at startup.
+    audio_pair = _build_audio_loop(
+        volume=cfg.volume,
+        mute=cfg.mute,
+        enabled=cfg.buzzer_enabled,
+    )
+    audio_loop = audio_pair[0] if audio_pair else None
+    audio_buzzer = audio_pair[1] if audio_pair else None
+
+    def _persist_audio_change(field: str, value) -> None:
+        if field == "volume":
+            cfg.volume = int(value)
+        elif field == "mute":
+            cfg.mute = bool(value)
+        elif field == "buzzer_enabled":
+            cfg.buzzer_enabled = bool(value)
+        else:
+            return
+        try:
+            save_config(config_path, cfg)
+        except OSError:
+            logger.exception("could not persist audio config change")
+
+    app = build_app(
+        library=library,
+        controller=controller,
+        floppy_root=floppy_root,
+        audio_buzzer=audio_buzzer,
+        on_audio_change=_persist_audio_change,
+    )
 
     return Runtime(
         config=cfg,
@@ -178,6 +211,8 @@ async def build_runtime(
         library=library,
         controller=controller,
         app=app,
+        audio_loop=audio_loop,
+        audio_buzzer=audio_buzzer,
     )
 
 
@@ -196,12 +231,15 @@ def _build_sysfs_backend() -> SysfsBackend:
     return SysfsBackend()
 
 
-def _build_audio_loop(*, volume: int, mute: bool, enabled: bool) -> AudioLoop | None:
-    """Construct the audio loop if both the kernel I/O event sysfs and the
-    PWM sysfs are present. Returns None on any dev-box / pre-T11 setup
-    where either piece is missing — caller treats None as "no buzzer".
+def _build_audio_loop(
+    *, volume: int, mute: bool, enabled: bool
+) -> tuple[AudioLoop, SysfsPWMBuzzer] | None:
+    """Construct the audio loop + buzzer if both the kernel I/O event sysfs
+    and the PWM sysfs are present. Returns None on any dev-box / pre-T11
+    setup where either piece is missing — caller treats None as "no buzzer".
 
-    The PWM channel 0 is exported here if it isn't already.
+    The PWM channel 0 is exported here if it isn't already. Returns the
+    buzzer separately so the web API can hot-reload its mute/volume/enabled.
     """
     pwm_chip = Path("/sys/class/pwm/pwmchip0")
     sysfs_root = Path("/sys/class/usb_floppy/usb-floppy-pi")
@@ -219,8 +257,12 @@ def _build_audio_loop(*, volume: int, mute: bool, enabled: bool) -> AudioLoop | 
             logger.warning("audio: could not export pwm0 (%s); buzzer disabled", exc)
             return None
 
-    effective_volume = 0 if mute or not enabled else volume
-    buzzer = SysfsPWMBuzzer(pwmchip_path=pwm_chip, volume=effective_volume)
+    buzzer = SysfsPWMBuzzer(
+        pwmchip_path=pwm_chip,
+        volume=volume,
+        mute=mute,
+        enabled=enabled,
+    )
     loop = AudioLoop(
         reader=SysfsIOEventReader(sysfs_path=sysfs_root),
         state_machine=MotorStateMachine(),
@@ -228,11 +270,11 @@ def _build_audio_loop(*, volume: int, mute: bool, enabled: bool) -> AudioLoop | 
     )
     logger.info(
         "audio: buzzer initialised (volume=%d, mute=%s, enabled=%s)",
-        effective_volume,
+        volume,
         mute,
         enabled,
     )
-    return loop
+    return loop, buzzer
 
 
 def _auto_select_backend() -> GadgetBackend:
@@ -273,17 +315,11 @@ async def _main_async(config_path: Path, floppy_root: Path, port: int) -> None:
         gadget_backend=backend,
     )
 
-    # Audio buzzer (Phase 2.4) — independent of the gadget backend. Starts
-    # after the runtime is built so volume/mute from the persisted config
-    # are honoured from tick 0.
-    audio_loop = _build_audio_loop(
-        volume=runtime.config.volume,
-        mute=runtime.config.mute,
-        enabled=runtime.config.buzzer_enabled,
-    )
+    # Audio loop already built by build_runtime — start it as a background
+    # task here (only place we have an event loop available).
     audio_task: asyncio.Task | None = None
-    if audio_loop is not None:
-        audio_task = asyncio.create_task(audio_loop.run())
+    if runtime.audio_loop is not None:
+        audio_task = asyncio.create_task(runtime.audio_loop.run())
 
     config = uvicorn.Config(
         runtime.app,
